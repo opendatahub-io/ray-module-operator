@@ -69,6 +69,7 @@ func SetupWithManager(ctx context.Context, mgr ctrl.Manager, manifestsBasePath s
 		).
 		WithAction(managementStateAction()).
 		WithAction(manifestInitAction()).
+		WithAction(applyImageParamsAction(manifestsBasePath)).
 		WithAction(RenderKustomize(manifestsBasePath, nsFn)).
 		WithAction(deploy.NewAction(
 			deploy.WithFieldOwner(constants.FieldOwner),

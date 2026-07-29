@@ -20,3 +20,6 @@
 
 # Re-include embedded manifests for go:embed
 !internal/controller/manifests/
+
+# Re-include manifest download script for Docker build stage
+!hack/scripts/get-manifests.sh
