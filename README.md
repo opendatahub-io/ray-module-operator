@@ -39,7 +39,7 @@ make lint
 ### Docker Build
 
 ```sh
-make docker-build IMG=quay.io/opendatahub/ray-module-operator:latest
+make docker-build IMG=quay.io/opendatahub/odh-ray-module-operator:latest
 ```
 
 ## License

@@ -4,6 +4,6 @@ metadata:
   labels:
     app.kubernetes.io/name: ray-module-operator
     app.kubernetes.io/managed-by: kustomize
-  name: ray-sample
+  name: default-ray
 spec:
-  # TODO(user): Add fields here
+  managementState: Managed
