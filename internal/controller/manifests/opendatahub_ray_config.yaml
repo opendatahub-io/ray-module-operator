@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opendatahub-ray-config
+data:
+  distribution.name: Standalone
+  distribution.version: "0.0.0"

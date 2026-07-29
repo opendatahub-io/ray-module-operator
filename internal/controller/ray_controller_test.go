@@ -32,13 +32,12 @@ import (
 
 var _ = Describe("Ray Controller", func() {
 	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
+		const resourceName = componentsv1alpha1.RayInstanceName
 
 		ctx := context.Background()
 
 		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+			Name: resourceName,
 		}
 		ray := &componentsv1alpha1.Ray{}
 
@@ -48,8 +47,7 @@ var _ = Describe("Ray Controller", func() {
 			if errors.IsNotFound(err) {
 				resource := &componentsv1alpha1.Ray{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
+						Name: resourceName,
 					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
@@ -59,7 +57,6 @@ var _ = Describe("Ray Controller", func() {
 		})
 
 		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
 			resource := &componentsv1alpha1.Ray{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
@@ -78,8 +75,21 @@ var _ = Describe("Ray Controller", func() {
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+		})
+	})
+
+	Context("CEL singleton validation", func() {
+		ctx := context.Background()
+
+		It("should reject a Ray CR with a name other than default-ray", func() {
+			invalid := &componentsv1alpha1.Ray{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "not-default-ray",
+				},
+			}
+			err := k8sClient.Create(ctx, invalid)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("Ray name must be default-ray"))
 		})
 	})
 })

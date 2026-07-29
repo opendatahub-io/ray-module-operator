@@ -1,5 +1,5 @@
 # Image URL to use all building/pushing image targets
-IMG ?= quay.io/opendatahub/ray-module-operator:latest
+IMG ?= quay.io/opendatahub/odh-ray-module-operator:latest
 # YEAR defines the year value used for substituting the YEAR placeholder in the boilerplate header.
 YEAR ?= $(shell date +%Y)
 
@@ -52,6 +52,15 @@ sync-module-manifests: manifests ## Sync generated and source manifests into the
 	@echo "Syncing module manifests into internal/controller/manifests/"
 	@cp -f config/module/*.yaml internal/controller/manifests/ 2>/dev/null || true
 
+EMBEDDED_MANIFESTS := ray_operator_scc.yaml opendatahub_ray_config.yaml
+
+.PHONY: verify-manifests
+verify-manifests: ## Verify embedded manifests match config/module source
+	@for f in $(EMBEDDED_MANIFESTS); do \
+		diff -u config/module/$$f internal/controller/manifests/$$f || \
+		(echo "ERROR: $$f out of sync. Run 'make sync-module-manifests' to fix." && exit 1); \
+	done
+
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt",year=$(YEAR) paths="./..."
@@ -65,7 +74,7 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 .PHONY: test
-test: manifests generate fmt vet setup-envtest ## Run tests.
+test: manifests generate fmt vet verify-manifests setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e)
 
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.

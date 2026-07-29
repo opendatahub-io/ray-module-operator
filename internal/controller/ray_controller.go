@@ -33,9 +33,13 @@ type RayReconciler struct {
 	Scheme *runtime.Scheme
 }
 
+// RBAC: cluster-scoped permissions only. Namespace-scoped operand
+// permissions are in config/rbac/namespace_role.yaml (hand-authored).
 // +kubebuilder:rbac:groups=components.platform.opendatahub.io,resources=rays,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=components.platform.opendatahub.io,resources=rays/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=components.platform.opendatahub.io,resources=rays/finalizers,verbs=update
+// TODO(RHOAIENG-64546): create;update;patch added when CRD bootstrap reconciliation lands
+// +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
 
 func (r *RayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	_ = logf.FromContext(ctx)
