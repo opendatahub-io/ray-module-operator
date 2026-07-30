@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
@@ -34,8 +35,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	componentsv1alpha1 "github.com/opendatahub-io/ray-module-operator/api/v1alpha1"
+	"github.com/opendatahub-io/ray-module-operator/internal/constants"
 	"github.com/opendatahub-io/ray-module-operator/internal/controller"
-	// +kubebuilder:scaffold:imports
 )
 
 var (
@@ -170,15 +171,11 @@ func setupManager(cfg managerConfig) ctrl.Manager {
 	return mgr
 }
 
-func registerControllers(mgr ctrl.Manager) {
-	if err := (&controller.RayReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+func registerControllers(ctx context.Context, mgr ctrl.Manager) {
+	if err := controller.SetupWithManager(ctx, mgr, constants.ManifestsBasePath); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "ray")
 		os.Exit(1)
 	}
-	// +kubebuilder:scaffold:builder
 }
 
 func registerHealthChecks(mgr ctrl.Manager) {
@@ -194,12 +191,13 @@ func registerHealthChecks(mgr ctrl.Manager) {
 
 func main() {
 	cfg := parseFlags()
+	ctx := ctrl.SetupSignalHandler()
 	mgr := setupManager(cfg)
-	registerControllers(mgr)
+	registerControllers(ctx, mgr)
 	registerHealthChecks(mgr)
 
 	setupLog.Info("Starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "Failed to run manager")
 		os.Exit(1)
 	}

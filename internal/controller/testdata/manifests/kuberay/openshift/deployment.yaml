@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kuberay-operator
+  labels:
+    app: kuberay-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kuberay-operator
+  template:
+    metadata:
+      labels:
+        app: kuberay-operator
+    spec:
+      containers:
+        - name: manager
+          image: quay.io/opendatahub/kuberay-operator:test
+          ports:
+            - containerPort: 8080
