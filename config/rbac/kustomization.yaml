@@ -27,4 +27,3 @@ resources:
 - ray_admin_role.yaml
 - ray_editor_role.yaml
 - ray_viewer_role.yaml
-

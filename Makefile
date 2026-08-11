@@ -54,6 +54,10 @@ sync-module-manifests: manifests ## Sync generated and source manifests into the
 
 EMBEDDED_MANIFESTS := ray_operator_scc.yaml opendatahub_ray_config.yaml
 
+.PHONY: get-manifests
+get-manifests: ## Download kuberay operand manifests (ODH_PLATFORM_TYPE, DST_MANIFESTS_DIR, USE_LOCAL supported).
+	./hack/scripts/get-manifests.sh
+
 .PHONY: verify-manifests
 verify-manifests: ## Verify embedded manifests match config/module source
 	@for f in $(EMBEDDED_MANIFESTS); do \
