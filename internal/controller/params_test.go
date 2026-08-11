@@ -45,7 +45,7 @@ func TestApplyParams_OverridesNamespace(t *testing.T) {
 	dir := t.TempDir()
 	writeTestParams(t, dir, "namespace=opendatahub\nodh-kuberay-operator-controller-image=quay.io/default:v1\n")
 
-	err := applyParams(dir, "params.env", nil, map[string]string{"namespace": "my-ns"})
+	err := applyParams(dir, nil, map[string]string{"namespace": "my-ns"})
 	if err != nil {
 		t.Fatalf("applyParams: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestApplyParams_EnvVarOverride(t *testing.T) {
 	t.Setenv("RELATED_IMAGE_ODH_KUBERAY_OPERATOR_CONTROLLER_IMAGE", "registry.redhat.io/kuberay:v2.0")
 	t.Setenv("RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE", "registry.redhat.io/proxy:v2.0")
 
-	err := applyParams(dir, "params.env", imageParamMap)
+	err := applyParams(dir, imageParamMap)
 	if err != nil {
 		t.Fatalf("applyParams: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestApplyParams_NoOpWhenUnchanged(t *testing.T) {
 	content := "namespace=opendatahub\nodh-kuberay-operator-controller-image=quay.io/default:v1\n"
 	writeTestParams(t, dir, content)
 
-	err := applyParams(dir, "params.env", imageParamMap, map[string]string{"namespace": "opendatahub"})
+	err := applyParams(dir, imageParamMap, map[string]string{"namespace": "opendatahub"})
 	if err != nil {
 		t.Fatalf("applyParams: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestApplyParams_NoOpWhenUnchanged(t *testing.T) {
 func TestApplyParams_MissingFileReturnsNil(t *testing.T) {
 	dir := t.TempDir()
 
-	err := applyParams(dir, "params.env", imageParamMap)
+	err := applyParams(dir, imageParamMap)
 	if err != nil {
 		t.Fatalf("expected nil for missing file, got: %v", err)
 	}

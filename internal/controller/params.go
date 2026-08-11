@@ -51,7 +51,7 @@ func applyImageParamsAction(basePath string) actions.Fn {
 		ray := rr.Instance.(*componentsv1alpha1.Ray)
 		componentPath := filepath.Join(basePath, constants.ManifestPath, constants.ManifestOverlay)
 
-		return applyParams(componentPath, "params.env", imageParamMap,
+		return applyParams(componentPath, imageParamMap,
 			map[string]string{"namespace": ray.Spec.ApplicationsNamespace},
 		)
 	}
@@ -60,8 +60,8 @@ func applyImageParamsAction(basePath string) actions.Fn {
 // applyParams reads a key=value params file, overrides values from
 // RELATED_IMAGE_* environment variables and extra parameter maps, then
 // writes the result back atomically via tmp+rename.
-func applyParams(componentPath, file string, imageParamsMap map[string]string, extraParamsMaps ...map[string]string) error {
-	paramsFile := filepath.Join(componentPath, file)
+func applyParams(componentPath string, imageParamsMap map[string]string, extraParamsMaps ...map[string]string) error {
+	paramsFile := filepath.Join(componentPath, "params.env")
 
 	paramsEnvMap, err := parseParams(paramsFile)
 	if err != nil {
@@ -98,7 +98,7 @@ func applyParams(componentPath, file string, imageParamsMap map[string]string, e
 	if err != nil {
 		return err
 	}
-	defer tmp.Close()
+	defer func() { _ = tmp.Close() }()
 
 	writer := bufio.NewWriter(tmp)
 	for key, value := range paramsEnvMap {
@@ -125,7 +125,7 @@ func parseParams(fileName string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	params := make(map[string]string)
 	scanner := bufio.NewScanner(f)
