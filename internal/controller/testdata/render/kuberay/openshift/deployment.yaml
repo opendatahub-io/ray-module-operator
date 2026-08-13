@@ -13,9 +13,16 @@ spec:
       labels:
         app.kubernetes.io/component: kuberay-operator
     spec:
+      securityContext:
+        runAsNonRoot: true
       containers:
       - name: kuberay-operator
         image: $(odh-kuberay-operator-controller-image)
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
         env:
         - name: ENABLE_WEBHOOKS
           value: "true"
