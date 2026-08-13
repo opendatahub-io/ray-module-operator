@@ -31,13 +31,12 @@ const (
 	testTargetNS       = "test-apps"
 )
 
-func TestWebhookRender(t *testing.T) {
+func renderWebhookTestdata(t *testing.T) map[gvk][]unstructured.Unstructured {
+	t.Helper()
 	overlayPath := filepath.Join(renderTestdataPath, "kuberay", "openshift")
-
 	overlayPath = copyRenderTestdata(t, overlayPath)
 
-	err := applyParams(overlayPath, nil, map[string]string{"namespace": testTargetNS})
-	if err != nil {
+	if err := applyParams(overlayPath, nil, map[string]string{"namespace": testTargetNS}); err != nil {
 		t.Fatalf("applyParams failed: %v", err)
 	}
 
@@ -47,177 +46,172 @@ func TestWebhookRender(t *testing.T) {
 		t.Fatalf("Render failed: %v", err)
 	}
 
-	idx := indexByGVK(resources)
+	return indexByGVK(resources)
+}
 
-	t.Run("MutatingWebhookConfiguration", func(t *testing.T) {
-		key := gvk{"admissionregistration.k8s.io/v1", "MutatingWebhookConfiguration"}
-		mwcs := idx[key]
-		if len(mwcs) != 1 {
-			t.Fatalf("expected 1 MutatingWebhookConfiguration, got %d", len(mwcs))
+func TestWebhookRender_MutatingWebhookConfiguration(t *testing.T) {
+	idx := renderWebhookTestdata(t)
+	key := gvk{"admissionregistration.k8s.io/v1", "MutatingWebhookConfiguration"}
+	mwcs := idx[key]
+	if len(mwcs) != 1 {
+		t.Fatalf("expected 1 MutatingWebhookConfiguration, got %d", len(mwcs))
+	}
+	mwc := mwcs[0]
+
+	if name := mwc.GetName(); name != "kuberay-mutating-webhook-configuration" {
+		t.Errorf("name = %q, want %q", name, "kuberay-mutating-webhook-configuration")
+	}
+
+	annotations := mwc.GetAnnotations()
+	if v, ok := annotations["cert-manager.io/inject-ca-from"]; !ok {
+		t.Error("missing cert-manager.io/inject-ca-from annotation")
+	} else if want := testTargetNS + "/serving-cert"; v != want {
+		t.Errorf("cert-manager.io/inject-ca-from = %q, want %q", v, want)
+	}
+
+	assertNoServingCertAnnotations(t, annotations)
+}
+
+func TestWebhookRender_NoValidatingWebhookConfiguration(t *testing.T) {
+	idx := renderWebhookTestdata(t)
+	key := gvk{"admissionregistration.k8s.io/v1", "ValidatingWebhookConfiguration"}
+	if vwcs := idx[key]; len(vwcs) != 0 {
+		t.Errorf("expected 0 ValidatingWebhookConfigurations, got %d", len(vwcs))
+	}
+}
+
+func TestWebhookRender_Certificate(t *testing.T) {
+	idx := renderWebhookTestdata(t)
+	key := gvk{"cert-manager.io/v1", "Certificate"}
+	certs := idx[key]
+	if len(certs) != 1 {
+		t.Fatalf("expected 1 Certificate, got %d", len(certs))
+	}
+	cert := certs[0]
+
+	secretName, _, _ := unstructured.NestedString(cert.Object, "spec", "secretName")
+	if secretName != "kuberay-webhook-server-cert" {
+		t.Errorf("secretName = %q, want %q", secretName, "kuberay-webhook-server-cert")
+	}
+
+	dnsNames, _, _ := unstructured.NestedStringSlice(cert.Object, "spec", "dnsNames")
+	wantDNS := []string{
+		"kuberay-webhook-service." + testTargetNS + ".svc",
+		"kuberay-webhook-service." + testTargetNS + ".svc.cluster.local",
+	}
+	if !stringSliceEqual(dnsNames, wantDNS) {
+		t.Errorf("dnsNames = %v, want %v", dnsNames, wantDNS)
+	}
+}
+
+func TestWebhookRender_Issuer(t *testing.T) {
+	idx := renderWebhookTestdata(t)
+	key := gvk{"cert-manager.io/v1", "Issuer"}
+	issuers := idx[key]
+	if len(issuers) != 1 {
+		t.Fatalf("expected 1 Issuer, got %d", len(issuers))
+	}
+	if name := issuers[0].GetName(); name != "selfsigned-issuer" {
+		t.Errorf("name = %q, want %q", name, "selfsigned-issuer")
+	}
+}
+
+func TestWebhookRender_WebhookService(t *testing.T) {
+	idx := renderWebhookTestdata(t)
+	svc := findResource(t, idx, gvk{"v1", "Service"}, "kuberay-webhook-service")
+
+	ports, _, _ := unstructured.NestedSlice(svc.Object, "spec", "ports")
+	if len(ports) == 0 {
+		t.Fatal("expected at least one port on webhook service")
+	}
+	p := ports[0].(map[string]any)
+	port, _, _ := unstructured.NestedInt64(p, "port")
+	targetPort, _, _ := unstructured.NestedInt64(p, "targetPort")
+	if port != 443 {
+		t.Errorf("port = %d, want 443", port)
+	}
+	if targetPort != 9443 {
+		t.Errorf("targetPort = %d, want 9443", targetPort)
+	}
+
+	assertNoServingCertAnnotations(t, svc.GetAnnotations())
+}
+
+func TestWebhookRender_Deployment(t *testing.T) {
+	idx := renderWebhookTestdata(t)
+	dep := findResource(t, idx, gvk{"apps/v1", "Deployment"}, "kuberay-operator")
+
+	containers, _, _ := unstructured.NestedSlice(dep.Object,
+		"spec", "template", "spec", "containers")
+	if len(containers) == 0 {
+		t.Fatal("no containers in deployment")
+	}
+
+	c := containers[0].(map[string]any)
+
+	assertEnvVar(t, c, "ENABLE_WEBHOOKS", "true")
+	assertContainerPort(t, c, 9443)
+	assertCertVolume(t, dep)
+}
+
+func TestWebhookRender_NoNamespaceResource(t *testing.T) {
+	idx := renderWebhookTestdata(t)
+	key := gvk{"v1", "Namespace"}
+	if ns := idx[key]; len(ns) != 0 {
+		t.Errorf("expected 0 Namespace resources, got %d", len(ns))
+	}
+}
+
+func findResource(t *testing.T, idx map[gvk][]unstructured.Unstructured, key gvk, name string) unstructured.Unstructured {
+	t.Helper()
+	for _, r := range idx[key] {
+		if r.GetName() == name {
+			return r
 		}
-		mwc := mwcs[0]
+	}
+	t.Fatalf("%s/%s %q not found", key.apiVersion, key.kind, name)
+	return unstructured.Unstructured{}
+}
 
-		if name := mwc.GetName(); name != "kuberay-mutating-webhook-configuration" {
-			t.Errorf("name = %q, want %q", name, "kuberay-mutating-webhook-configuration")
+func assertEnvVar(t *testing.T, container map[string]any, name, value string) {
+	t.Helper()
+	envVars, _, _ := unstructured.NestedSlice(container, "env")
+	for _, e := range envVars {
+		em := e.(map[string]any)
+		if em["name"] == name && em["value"] == value {
+			return
 		}
+	}
+	t.Errorf("env var %s=%s not found", name, value)
+}
 
-		annotations := mwc.GetAnnotations()
-		if v, ok := annotations["cert-manager.io/inject-ca-from"]; !ok {
-			t.Error("missing cert-manager.io/inject-ca-from annotation")
-		} else if want := testTargetNS + "/serving-cert"; v != want {
-			t.Errorf("cert-manager.io/inject-ca-from = %q, want %q", v, want)
-		}
-
-		assertNoServingCertAnnotations(t, annotations)
-	})
-
-	t.Run("NoValidatingWebhookConfiguration", func(t *testing.T) {
-		key := gvk{"admissionregistration.k8s.io/v1", "ValidatingWebhookConfiguration"}
-		if vwcs := idx[key]; len(vwcs) != 0 {
-			t.Errorf("expected 0 ValidatingWebhookConfigurations, got %d", len(vwcs))
-		}
-	})
-
-	t.Run("Certificate", func(t *testing.T) {
-		key := gvk{"cert-manager.io/v1", "Certificate"}
-		certs := idx[key]
-		if len(certs) != 1 {
-			t.Fatalf("expected 1 Certificate, got %d", len(certs))
-		}
-		cert := certs[0]
-
-		secretName, _, _ := unstructured.NestedString(cert.Object, "spec", "secretName")
-		if secretName != "kuberay-webhook-server-cert" {
-			t.Errorf("secretName = %q, want %q", secretName, "kuberay-webhook-server-cert")
-		}
-
-		dnsNames, _, _ := unstructured.NestedStringSlice(cert.Object, "spec", "dnsNames")
-		wantDNS := []string{
-			"kuberay-webhook-service." + testTargetNS + ".svc",
-			"kuberay-webhook-service." + testTargetNS + ".svc.cluster.local",
-		}
-		if !stringSliceEqual(dnsNames, wantDNS) {
-			t.Errorf("dnsNames = %v, want %v", dnsNames, wantDNS)
-		}
-	})
-
-	t.Run("Issuer", func(t *testing.T) {
-		key := gvk{"cert-manager.io/v1", "Issuer"}
-		issuers := idx[key]
-		if len(issuers) != 1 {
-			t.Fatalf("expected 1 Issuer, got %d", len(issuers))
-		}
-		if name := issuers[0].GetName(); name != "selfsigned-issuer" {
-			t.Errorf("name = %q, want %q", name, "selfsigned-issuer")
-		}
-	})
-
-	t.Run("WebhookService", func(t *testing.T) {
-		key := gvk{"v1", "Service"}
-		svcs := idx[key]
-
-		var svc *unstructured.Unstructured
-		for i := range svcs {
-			if svcs[i].GetName() == "kuberay-webhook-service" {
-				svc = &svcs[i]
-				break
+func assertContainerPort(t *testing.T, container map[string]any, want int64) {
+	t.Helper()
+	ports, _, _ := unstructured.NestedSlice(container, "ports")
+	for _, p := range ports {
+		pm := p.(map[string]any)
+		if port, ok := pm["containerPort"]; ok {
+			if portVal, ok := port.(int64); ok && portVal == want {
+				return
 			}
 		}
-		if svc == nil {
-			t.Fatal("Service kuberay-webhook-service not found")
-		}
+	}
+	t.Errorf("containerPort %d not found", want)
+}
 
-		ports, _, _ := unstructured.NestedSlice(svc.Object, "spec", "ports")
-		if len(ports) == 0 {
-			t.Fatal("expected at least one port on webhook service")
-		}
-		p := ports[0].(map[string]interface{})
-		port, _, _ := unstructured.NestedInt64(p, "port")
-		targetPort, _, _ := unstructured.NestedInt64(p, "targetPort")
-		if port != 443 {
-			t.Errorf("port = %d, want 443", port)
-		}
-		if targetPort != 9443 {
-			t.Errorf("targetPort = %d, want 9443", targetPort)
-		}
-
-		assertNoServingCertAnnotations(t, svc.GetAnnotations())
-	})
-
-	t.Run("Deployment", func(t *testing.T) {
-		key := gvk{"apps/v1", "Deployment"}
-		deps := idx[key]
-
-		var dep *unstructured.Unstructured
-		for i := range deps {
-			if deps[i].GetName() == "kuberay-operator" {
-				dep = &deps[i]
-				break
+func assertCertVolume(t *testing.T, dep unstructured.Unstructured) {
+	t.Helper()
+	volumes, _, _ := unstructured.NestedSlice(dep.Object,
+		"spec", "template", "spec", "volumes")
+	for _, v := range volumes {
+		vm := v.(map[string]any)
+		if sec, ok := vm["secret"].(map[string]any); ok {
+			if sec["secretName"] == "kuberay-webhook-server-cert" {
+				return
 			}
 		}
-		if dep == nil {
-			t.Fatal("Deployment kuberay-operator not found")
-		}
-
-		containers, _, _ := unstructured.NestedSlice(dep.Object,
-			"spec", "template", "spec", "containers")
-		if len(containers) == 0 {
-			t.Fatal("no containers in deployment")
-		}
-
-		c := containers[0].(map[string]interface{})
-
-		envVars, _, _ := unstructured.NestedSlice(c, "env")
-		foundWebhookEnv := false
-		for _, e := range envVars {
-			em := e.(map[string]interface{})
-			if em["name"] == "ENABLE_WEBHOOKS" && em["value"] == "true" {
-				foundWebhookEnv = true
-				break
-			}
-		}
-		if !foundWebhookEnv {
-			t.Error("ENABLE_WEBHOOKS=true env var not found")
-		}
-
-		cPorts, _, _ := unstructured.NestedSlice(c, "ports")
-		found9443 := false
-		for _, p := range cPorts {
-			pm := p.(map[string]interface{})
-			if port, ok := pm["containerPort"]; ok {
-				if portVal, ok := port.(int64); ok && portVal == 9443 {
-					found9443 = true
-					break
-				}
-			}
-		}
-		if !found9443 {
-			t.Error("containerPort 9443 not found")
-		}
-
-		volumes, _, _ := unstructured.NestedSlice(dep.Object,
-			"spec", "template", "spec", "volumes")
-		foundCertVolume := false
-		for _, v := range volumes {
-			vm := v.(map[string]interface{})
-			if sec, ok := vm["secret"].(map[string]interface{}); ok {
-				if sec["secretName"] == "kuberay-webhook-server-cert" {
-					foundCertVolume = true
-					break
-				}
-			}
-		}
-		if !foundCertVolume {
-			t.Error("volume with secretName kuberay-webhook-server-cert not found")
-		}
-	})
-
-	t.Run("NoNamespaceResource", func(t *testing.T) {
-		key := gvk{"v1", "Namespace"}
-		if ns := idx[key]; len(ns) != 0 {
-			t.Errorf("expected 0 Namespace resources, got %d", len(ns))
-		}
-	})
+	}
+	t.Error("volume with secretName kuberay-webhook-server-cert not found")
 }
 
 type gvk struct {
