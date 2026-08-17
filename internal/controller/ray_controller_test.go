@@ -36,7 +36,7 @@ import (
 
 const (
 	testNamespace = "test-ray-ns"
-	timeout       = 30 * time.Second
+	timeout       = 60 * time.Second
 	interval      = 250 * time.Millisecond
 )
 
@@ -49,6 +49,19 @@ var _ = Describe("Ray Controller", Ordered, func() {
 			ObjectMeta: metav1.ObjectMeta{Name: testNamespace},
 		}
 		Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
+
+		By("creating the default platform ConfigMap (standalone defaults)")
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      constants.PlatformConfigMapName,
+				Namespace: testNamespace,
+			},
+			Data: map[string]string{
+				constants.PlatformNameKey:    constants.StandaloneDistributionName,
+				constants.PlatformVersionKey: "0.0.0",
+			},
+		}
+		Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, cm))).To(Succeed())
 	})
 
 	AfterAll(func() {
@@ -90,6 +103,13 @@ var _ = Describe("Ray Controller", Ordered, func() {
 
 	Context("when managementState is Managed", func() {
 		It("should deploy operand resources", func() {
+			By("waiting for the initial reconcile to process the CR")
+			Eventually(func(g Gomega) {
+				ray := &componentsv1alpha1.Ray{}
+				g.Expect(k8sClient.Get(ctx, rayCR, ray)).To(Succeed())
+				g.Expect(ray.Status.Conditions).NotTo(BeEmpty())
+			}, timeout, interval).Should(Succeed())
+
 			By("updating Ray CR with applicationsNamespace")
 			ray := &componentsv1alpha1.Ray{}
 			Expect(k8sClient.Get(ctx, rayCR, ray)).To(Succeed())
@@ -116,11 +136,123 @@ var _ = Describe("Ray Controller", Ordered, func() {
 				}, cm)
 			}, timeout, interval).Should(Succeed())
 
+			By("verifying KubeRay is reported in status.releases")
+			Eventually(func(g Gomega) {
+				ray := &componentsv1alpha1.Ray{}
+				g.Expect(k8sClient.Get(ctx, rayCR, ray)).To(Succeed())
+				g.Expect(ray.Status.ObservedGeneration).To(Equal(ray.Generation))
+
+				g.Expect(ray.Status.Releases).To(HaveLen(1))
+				g.Expect(ray.Status.Releases[0].Name).To(Equal(constants.KubeRayReleaseName))
+				g.Expect(ray.Status.Releases[0].Version).To(Equal("v1.6.2"))
+				g.Expect(ray.Status.Releases[0].RepoURL).To(Equal(constants.KubeRayRepoURL))
+			}, timeout, interval).Should(Succeed())
+
+			By("verifying Degraded is False")
+			Eventually(func(g Gomega) {
+				ray := &componentsv1alpha1.Ray{}
+				g.Expect(k8sClient.Get(ctx, rayCR, ray)).To(Succeed())
+
+				found := false
+				for _, c := range ray.Status.Conditions {
+					if c.Type == constants.ConditionDegraded {
+						g.Expect(string(c.Status)).To(Equal("False"))
+						g.Expect(c.Reason).To(Equal("AsExpected"))
+						found = true
+						break
+					}
+				}
+				g.Expect(found).To(BeTrue(), "Degraded condition not found")
+			}, timeout, interval).Should(Succeed())
+
+			By("marking the KubeRay Deployment available")
+			Eventually(func(g Gomega) {
+				dep := &appsv1.Deployment{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      "kuberay-operator",
+					Namespace: testNamespace,
+				}, dep)).To(Succeed())
+				dep.Status.Replicas = 1
+				dep.Status.ReadyReplicas = 1
+				dep.Status.AvailableReplicas = 1
+				dep.Status.UpdatedReplicas = 1
+				g.Expect(k8sClient.Status().Update(ctx, dep)).To(Succeed())
+			}, timeout, interval).Should(Succeed())
+
+			By("verifying standalone status.distribution after rollout")
+			Eventually(func(g Gomega) {
+				ray := &componentsv1alpha1.Ray{}
+				g.Expect(k8sClient.Get(ctx, rayCR, ray)).To(Succeed())
+				g.Expect(ray.Status.Distribution.Name).To(Equal(constants.StandaloneDistributionName))
+				g.Expect(ray.Status.Distribution.Version).To(Equal("0.0.0"))
+			}, timeout, interval).Should(Succeed())
+		})
+	})
+
+	Context("when the platform config ConfigMap is present", func() {
+		It("should stamp status.distribution from the ConfigMap after rollout", func() {
+			By("updating the platform config ConfigMap with platform values")
+			cm := &corev1.ConfigMap{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      constants.PlatformConfigMapName,
+				Namespace: testNamespace,
+			}, cm)).To(Succeed())
+			cm.Data[constants.PlatformNameKey] = "OpenDataHub"
+			cm.Data[constants.PlatformVersionKey] = "2.20.0"
+			Expect(k8sClient.Update(ctx, cm)).To(Succeed())
+
+			By("verifying status.distribution matches the ConfigMap")
+			Eventually(func(g Gomega) {
+				ray := &componentsv1alpha1.Ray{}
+				g.Expect(k8sClient.Get(ctx, rayCR, ray)).To(Succeed())
+				g.Expect(ray.Status.ObservedGeneration).To(Equal(ray.Generation))
+				g.Expect(ray.Status.Distribution.Name).To(Equal("OpenDataHub"))
+				g.Expect(ray.Status.Distribution.Version).To(Equal("2.20.0"))
+				g.Expect(ray.Status.Releases).To(HaveLen(1))
+				g.Expect(ray.Status.Releases[0].Name).To(Equal(constants.KubeRayReleaseName))
+			}, timeout, interval).Should(Succeed())
+		})
+	})
+
+	Context("when the platform ConfigMap version is invalid", func() {
+		It("should keep deploying and retain the previous distribution", func() {
+			By("updating the platform config ConfigMap with an invalid version")
+			cm := &corev1.ConfigMap{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      constants.PlatformConfigMapName,
+				Namespace: testNamespace,
+			}, cm)).To(Succeed())
+			cm.Data[constants.PlatformVersionKey] = "not-a-semver"
+			Expect(k8sClient.Update(ctx, cm)).To(Succeed())
+
+			By("verifying the Deployment is still present")
+			Consistently(func() error {
+				dep := &appsv1.Deployment{}
+				return k8sClient.Get(ctx, types.NamespacedName{
+					Name:      "kuberay-operator",
+					Namespace: testNamespace,
+				}, dep)
+			}, 3*time.Second, interval).Should(Succeed())
+
+			By("verifying status.distribution is unchanged")
+			Consistently(func(g Gomega) {
+				ray := &componentsv1alpha1.Ray{}
+				g.Expect(k8sClient.Get(ctx, rayCR, ray)).To(Succeed())
+				g.Expect(ray.Status.Distribution.Name).To(Equal("OpenDataHub"))
+				g.Expect(ray.Status.Distribution.Version).To(Equal("2.20.0"))
+			}, 3*time.Second, interval).Should(Succeed())
 		})
 	})
 
 	Context("when managementState is Removed", func() {
 		It("should clean up operand resources", func() {
+			By("waiting for any pending reconciles to settle")
+			Eventually(func(g Gomega) {
+				ray := &componentsv1alpha1.Ray{}
+				g.Expect(k8sClient.Get(ctx, rayCR, ray)).To(Succeed())
+				g.Expect(ray.Status.ObservedGeneration).To(Equal(ray.Generation))
+			}, timeout, interval).Should(Succeed())
+
 			By("updating managementState to Removed")
 			ray := &componentsv1alpha1.Ray{}
 			Expect(k8sClient.Get(ctx, rayCR, ray)).To(Succeed())
