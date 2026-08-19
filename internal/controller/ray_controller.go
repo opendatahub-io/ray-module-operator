@@ -30,6 +30,7 @@ import (
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/types"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
@@ -56,8 +57,9 @@ import (
 
 // SetupWithManager wires the Ray reconciler pipeline into the controller
 // manager. The pipeline is: management state → releases → manifest init →
-// kustomize render → deploy (SSA) → deployment status → distribution →
-// Degraded → observedGeneration → garbage collect.
+// kustomize render → deploy (SSA, ForceOwnership) → deployment status →
+// distribution → Degraded → observedGeneration → garbage collect.
+// WithFinalizer cleans owned operands on Ray CR deletion (webhooks, SCC); CRDs stay.
 func SetupWithManager(ctx context.Context, mgr ctrl.Manager, manifestsBasePath string) error {
 	nsFn := namespaceFn
 
@@ -76,6 +78,7 @@ func SetupWithManager(ctx context.Context, mgr ctrl.Manager, manifestsBasePath s
 		).
 		WithReconcilerOpts(
 			reconciler.WithRelease(frameworkapi.Release{Name: "opendatahub"}),
+			reconciler.WithFinalizerName(constants.FinalizerName),
 			reconciler.WithPreApplyFn(waitForNamespace),
 			reconciler.WithPreApplyFailedReason("ApplicationsNamespaceNotProjected"),
 		).
@@ -96,7 +99,14 @@ func SetupWithManager(ctx context.Context, mgr ctrl.Manager, manifestsBasePath s
 		WithAction(gc.NewAction(
 			nsFn,
 			gc.WithDeletePropagationPolicy(metav1.DeletePropagationBackground),
+			// Removed (generation bump) must collect labeled webhooks/SCC even
+			// when they have no ownerRef. Managed is still gated by the default
+			// generation predicate. OwnerRefs are possible (cluster-scoped Ray +
+			// dynamic ownership) but cascade waits on the CR finalizer, and
+			// in-tree leftovers may only carry the part-of label.
+			gc.WithOnlyCollectOwned(false),
 		)).
+		WithFinalizer(deletionCleanupAction(nsFn)).
 		Build(ctx)
 
 	return err
@@ -112,6 +122,37 @@ func waitForNamespace(_ context.Context, rr *types.ReconciliationRequest) bool {
 	ray := rr.Instance.(*componentsv1alpha1.Ray)
 
 	return ray.Spec.ApplicationsNamespace == ""
+}
+
+// deletionCleanupAction runs on Ray CR deletion. The framework delete path
+// does not run the reconcile pipeline, so Generated is false and the default
+// GC generation predicate would skip current operands. Force Generated and
+// delete labeled operands (webhooks, SCC) even without ownerRef; CRDs stay.
+// Empty applicationsNamespace means nothing was deployed — skip GC so the
+// finalizer cannot stick.
+func deletionCleanupAction(nsFn actions.Getter[string]) actions.Fn {
+	gcFn := gc.NewAction(
+		nsFn,
+		gc.WithDeletePropagationPolicy(metav1.DeletePropagationBackground),
+		gc.WithOnlyCollectOwned(false),
+		gc.WithObjectPredicate(func(_ *types.ReconciliationRequest, _ unstructured.Unstructured) (bool, error) {
+			return true, nil
+		}),
+	)
+
+	return func(ctx context.Context, rr *types.ReconciliationRequest) error {
+		ns, err := nsFn(ctx, rr)
+		if err != nil {
+			return err
+		}
+		if ns == "" {
+			return nil
+		}
+
+		rr.Generated = true
+
+		return gcFn(ctx, rr)
+	}
 }
 
 func managementStateAction() actions.Fn {

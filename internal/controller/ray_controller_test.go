@@ -22,22 +22,32 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/opendatahub-io/odh-platform-utilities/api/common"
+	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/actions/gc"
 	componentsv1alpha1 "github.com/opendatahub-io/ray-module-operator/api/v1alpha1"
 	"github.com/opendatahub-io/ray-module-operator/internal/constants"
 )
 
 const (
-	testNamespace = "test-ray-ns"
-	timeout       = 60 * time.Second
-	interval      = 250 * time.Millisecond
+	testNamespace  = "test-ray-ns"
+	timeout        = 60 * time.Second
+	interval       = 250 * time.Millisecond
+	webhookName    = "ray-kuberay-validating"
+	lifecycleCRD   = "fakes.lifecycle.ray.test.io"
+	inTreeImage    = "quay.io/opendatahub/kuberay-operator:in-tree"
+	managedImage   = "quay.io/opendatahub/kuberay-operator:test"
+	deploymentName = "kuberay-operator"
+	configMapName  = "ray-operator-config"
 )
 
 var _ = Describe("Ray Controller", Ordered, func() {
@@ -62,6 +72,9 @@ var _ = Describe("Ray Controller", Ordered, func() {
 			},
 		}
 		Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, cm))).To(Succeed())
+
+		By("creating a CRD labeled as a Ray operand (must survive GC)")
+		Expect(k8sClient.Create(ctx, labeledCRD())).To(Succeed())
 	})
 
 	AfterAll(func() {
@@ -71,59 +84,75 @@ var _ = Describe("Ray Controller", Ordered, func() {
 		if err == nil {
 			Expect(k8sClient.Delete(ctx, ray)).To(Succeed())
 		}
+
+		crd := &apiextensionsv1.CustomResourceDefinition{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: lifecycleCRD}, crd); err == nil {
+			Expect(k8sClient.Delete(ctx, crd)).To(Succeed())
+		}
 	})
 
 	Context("when applicationsNamespace is not projected", func() {
-		It("should not deploy any resources", func() {
+		It("should not deploy, should register a finalizer, and should delete without sticking", func() {
 			By("creating Ray CR without applicationsNamespace")
-			ray := &componentsv1alpha1.Ray{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: constants.InstanceName,
-				},
-				Spec: componentsv1alpha1.RaySpec{
-					ManagementSpec: common.ManagementSpec{
-						ManagementState: common.Managed,
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, ray)).To(Succeed())
+			Expect(k8sClient.Create(ctx, newRayCR(""))).To(Succeed())
 
 			By("verifying no deployment is created in the test namespace")
 			Consistently(func() bool {
-				dep := &appsv1.Deployment{}
-				err := k8sClient.Get(ctx, types.NamespacedName{
-					Name:      "kuberay-operator",
-					Namespace: testNamespace,
-				}, dep)
-
-				return errors.IsNotFound(err)
+				return isNotFound(&appsv1.Deployment{}, deploymentName, testNamespace)
 			}, 5*time.Second, interval).Should(BeTrue())
+
+			By("verifying the deletion finalizer is registered")
+			Eventually(func(g Gomega) {
+				ray := &componentsv1alpha1.Ray{}
+				g.Expect(k8sClient.Get(ctx, rayCR, ray)).To(Succeed())
+				g.Expect(controllerutil.ContainsFinalizer(ray, constants.FinalizerName)).To(BeTrue())
+			}, timeout, interval).Should(Succeed())
+
+			By("deleting the CR while namespace is still unprojected")
+			ray := &componentsv1alpha1.Ray{}
+			Expect(k8sClient.Get(ctx, rayCR, ray)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, ray)).To(Succeed())
+
+			Eventually(func() bool {
+				return isNotFound(&componentsv1alpha1.Ray{}, constants.InstanceName, "")
+			}, timeout, interval).Should(BeTrue())
 		})
 	})
 
 	Context("when managementState is Managed", func() {
-		It("should deploy operand resources", func() {
-			By("waiting for the initial reconcile to process the CR")
+		It("should adopt existing KubeRay resources and deploy the rest", func() {
+			By("creating an in-tree kuberay-operator Deployment")
+			existing := inTreeDeployment()
+			Expect(k8sClient.Create(ctx, existing)).To(Succeed())
+			originalUID := existing.UID
+			Expect(originalUID).NotTo(BeEmpty())
+
+			By("creating Ray CR with applicationsNamespace")
+			Expect(k8sClient.Create(ctx, newRayCR(testNamespace))).To(Succeed())
+
+			By("verifying the Deployment is adopted (same UID, spec and part-of label taken over)")
 			Eventually(func(g Gomega) {
+				dep := &appsv1.Deployment{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      deploymentName,
+					Namespace: testNamespace,
+				}, dep)).To(Succeed())
+				g.Expect(dep.UID).To(Equal(originalUID))
+				g.Expect(dep.Spec.Template.Spec.Containers).NotTo(BeEmpty())
+				g.Expect(dep.Spec.Template.Spec.Containers[0].Image).To(Equal(managedImage))
+				g.Expect(dep.Labels[gc.DefaultPartOfLabelKey]).To(Equal(constants.ComponentName))
+
 				ray := &componentsv1alpha1.Ray{}
 				g.Expect(k8sClient.Get(ctx, rayCR, ray)).To(Succeed())
-				g.Expect(ray.Status.Conditions).NotTo(BeEmpty())
-			}, timeout, interval).Should(Succeed())
+				owned := false
+				for _, ref := range dep.OwnerReferences {
+					if ref.UID == ray.UID && ref.Kind == "Ray" {
+						owned = true
 
-			By("updating Ray CR with applicationsNamespace")
-			ray := &componentsv1alpha1.Ray{}
-			Expect(k8sClient.Get(ctx, rayCR, ray)).To(Succeed())
-			ray.Spec.ApplicationsNamespace = testNamespace
-			Expect(k8sClient.Update(ctx, ray)).To(Succeed())
-
-			By("verifying the kuberay-operator Deployment is created")
-			Eventually(func() error {
-				dep := &appsv1.Deployment{}
-
-				return k8sClient.Get(ctx, types.NamespacedName{
-					Name:      "kuberay-operator",
-					Namespace: testNamespace,
-				}, dep)
+						break
+					}
+				}
+				g.Expect(owned).To(BeTrue(), "expected Ray ownerRef on adopted Deployment")
 			}, timeout, interval).Should(Succeed())
 
 			By("verifying the ConfigMap is created")
@@ -131,9 +160,16 @@ var _ = Describe("Ray Controller", Ordered, func() {
 				cm := &corev1.ConfigMap{}
 
 				return k8sClient.Get(ctx, types.NamespacedName{
-					Name:      "ray-operator-config",
+					Name:      configMapName,
 					Namespace: testNamespace,
 				}, cm)
+			}, timeout, interval).Should(Succeed())
+
+			By("verifying the cluster-scoped webhook is created")
+			Eventually(func() error {
+				wh := &admissionregistrationv1.ValidatingWebhookConfiguration{}
+
+				return k8sClient.Get(ctx, types.NamespacedName{Name: webhookName}, wh)
 			}, timeout, interval).Should(Succeed())
 
 			By("verifying KubeRay is reported in status.releases")
@@ -169,7 +205,7 @@ var _ = Describe("Ray Controller", Ordered, func() {
 			Eventually(func(g Gomega) {
 				dep := &appsv1.Deployment{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
-					Name:      "kuberay-operator",
+					Name:      deploymentName,
 					Namespace: testNamespace,
 				}, dep)).To(Succeed())
 				dep.Status.Replicas = 1
@@ -229,7 +265,7 @@ var _ = Describe("Ray Controller", Ordered, func() {
 			Consistently(func() error {
 				dep := &appsv1.Deployment{}
 				return k8sClient.Get(ctx, types.NamespacedName{
-					Name:      "kuberay-operator",
+					Name:      deploymentName,
 					Namespace: testNamespace,
 				}, dep)
 			}, 3*time.Second, interval).Should(Succeed())
@@ -245,7 +281,7 @@ var _ = Describe("Ray Controller", Ordered, func() {
 	})
 
 	Context("when managementState is Removed", func() {
-		It("should clean up operand resources", func() {
+		It("should clean up labeled operands but keep CRDs", func() {
 			By("waiting for any pending reconciles to settle")
 			Eventually(func(g Gomega) {
 				ray := &componentsv1alpha1.Ray{}
@@ -259,32 +295,26 @@ var _ = Describe("Ray Controller", Ordered, func() {
 			ray.Spec.ManagementState = common.Removed
 			Expect(k8sClient.Update(ctx, ray)).To(Succeed())
 
-			By("verifying the Deployment is deleted")
+			By("verifying namespaced and cluster-scoped operands are deleted")
 			Eventually(func() bool {
-				dep := &appsv1.Deployment{}
-				err := k8sClient.Get(ctx, types.NamespacedName{
-					Name:      "kuberay-operator",
-					Namespace: testNamespace,
-				}, dep)
-
-				return errors.IsNotFound(err)
+				return isNotFound(&appsv1.Deployment{}, deploymentName, testNamespace)
+			}, timeout, interval).Should(BeTrue())
+			Eventually(func() bool {
+				return isNotFound(&corev1.ConfigMap{}, configMapName, testNamespace)
+			}, timeout, interval).Should(BeTrue())
+			Eventually(func() bool {
+				return isNotFound(&admissionregistrationv1.ValidatingWebhookConfiguration{}, webhookName, "")
 			}, timeout, interval).Should(BeTrue())
 
-			By("verifying the ConfigMap is deleted")
-			Eventually(func() bool {
-				cm := &corev1.ConfigMap{}
-				err := k8sClient.Get(ctx, types.NamespacedName{
-					Name:      "ray-operator-config",
-					Namespace: testNamespace,
-				}, cm)
+			By("verifying the labeled CRD is kept")
+			crd := &apiextensionsv1.CustomResourceDefinition{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: lifecycleCRD}, crd)).To(Succeed())
 
-				return errors.IsNotFound(err)
-			}, timeout, interval).Should(BeTrue())
-
-			By("verifying DeploymentsAvailable condition is True with RemovedComponent reason")
+			By("verifying DeploymentsAvailable is True with RemovedComponent and the CR remains")
 			Eventually(func(g Gomega) {
 				ray := &componentsv1alpha1.Ray{}
 				g.Expect(k8sClient.Get(ctx, rayCR, ray)).To(Succeed())
+				g.Expect(controllerutil.ContainsFinalizer(ray, constants.FinalizerName)).To(BeTrue())
 
 				found := false
 				for _, c := range ray.Status.Conditions {
@@ -296,9 +326,67 @@ var _ = Describe("Ray Controller", Ordered, func() {
 						break
 					}
 				}
-
 				g.Expect(found).To(BeTrue(), "DeploymentsAvailable condition not found")
 			}, timeout, interval).Should(Succeed())
+		})
+	})
+
+	Context("when the Ray CR is deleted while already Removed", func() {
+		It("should remove the CR without sticking the finalizer", func() {
+			ray := &componentsv1alpha1.Ray{}
+			Expect(k8sClient.Get(ctx, rayCR, ray)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, ray)).To(Succeed())
+
+			Eventually(func() bool {
+				return isNotFound(&componentsv1alpha1.Ray{}, constants.InstanceName, "")
+			}, timeout, interval).Should(BeTrue())
+
+			By("verifying the labeled CRD is still kept")
+			crd := &apiextensionsv1.CustomResourceDefinition{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: lifecycleCRD}, crd)).To(Succeed())
+		})
+	})
+
+	Context("when the Ray CR is deleted while Managed", func() {
+		It("should clean up operands including the webhook, then remove the CR", func() {
+			By("creating a Managed Ray CR with operands")
+			Expect(k8sClient.Create(ctx, newRayCR(testNamespace))).To(Succeed())
+
+			Eventually(func() error {
+				dep := &appsv1.Deployment{}
+
+				return k8sClient.Get(ctx, types.NamespacedName{
+					Name:      deploymentName,
+					Namespace: testNamespace,
+				}, dep)
+			}, timeout, interval).Should(Succeed())
+			Eventually(func() error {
+				wh := &admissionregistrationv1.ValidatingWebhookConfiguration{}
+
+				return k8sClient.Get(ctx, types.NamespacedName{Name: webhookName}, wh)
+			}, timeout, interval).Should(Succeed())
+
+			By("deleting the Ray CR")
+			ray := &componentsv1alpha1.Ray{}
+			Expect(k8sClient.Get(ctx, rayCR, ray)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, ray)).To(Succeed())
+
+			Eventually(func() bool {
+				return isNotFound(&appsv1.Deployment{}, deploymentName, testNamespace)
+			}, timeout, interval).Should(BeTrue())
+			Eventually(func() bool {
+				return isNotFound(&corev1.ConfigMap{}, configMapName, testNamespace)
+			}, timeout, interval).Should(BeTrue())
+			Eventually(func() bool {
+				return isNotFound(&admissionregistrationv1.ValidatingWebhookConfiguration{}, webhookName, "")
+			}, timeout, interval).Should(BeTrue())
+			Eventually(func() bool {
+				return isNotFound(&componentsv1alpha1.Ray{}, constants.InstanceName, "")
+			}, timeout, interval).Should(BeTrue())
+
+			By("verifying the labeled CRD is still kept")
+			crd := &apiextensionsv1.CustomResourceDefinition{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: lifecycleCRD}, crd)).To(Succeed())
 		})
 	})
 
@@ -315,3 +403,80 @@ var _ = Describe("Ray Controller", Ordered, func() {
 		})
 	})
 })
+
+func newRayCR(applicationsNamespace string) *componentsv1alpha1.Ray {
+	return &componentsv1alpha1.Ray{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: constants.InstanceName,
+		},
+		Spec: componentsv1alpha1.RaySpec{
+			ManagementSpec: common.ManagementSpec{
+				ManagementState: common.Managed,
+			},
+			ApplicationsNamespace: applicationsNamespace,
+		},
+	}
+}
+
+func inTreeDeployment() *appsv1.Deployment {
+	replicas := int32(1)
+
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      deploymentName,
+			Namespace: testNamespace,
+			Labels:    map[string]string{"app": deploymentName},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": deploymentName},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"app": deploymentName},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:  "manager",
+						Image: inTreeImage,
+					}},
+				},
+			},
+		},
+	}
+}
+
+func labeledCRD() *apiextensionsv1.CustomResourceDefinition {
+	return &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: lifecycleCRD,
+			Labels: map[string]string{
+				gc.DefaultPartOfLabelKey: constants.ComponentName,
+			},
+		},
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Group: "lifecycle.ray.test.io",
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Plural:   "fakes",
+				Singular: "fake",
+				Kind:     "Fake",
+			},
+			Scope: apiextensionsv1.NamespaceScoped,
+			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{{
+				Name:    "v1",
+				Served:  true,
+				Storage: true,
+				Schema: &apiextensionsv1.CustomResourceValidation{
+					OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{Type: "object"},
+				},
+			}},
+		},
+	}
+}
+
+func isNotFound(obj client.Object, name, namespace string) bool {
+	err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, obj)
+
+	return errors.IsNotFound(err)
+}
