@@ -27,6 +27,14 @@ rules:
   - list
   - watch
 - apiGroups:
+  - ""
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
   - admissionregistration.k8s.io
   resources:
   - mutatingwebhookconfigurations
@@ -100,6 +108,43 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - ray.io
+  resources:
+  - rayclusters
+  - raycronjobs
+  - rayjobs
+  - rayservices
+  verbs:
+  - create
+  - delete
+  - deletecollection
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ray.io
+  resources:
+  - rayclusters/finalizers
+  - raycronjobs/finalizers
+  - rayjobs/finalizers
+  - rayservices/finalizers
+  verbs:
+  - get
+  - update
+- apiGroups:
+  - ray.io
+  resources:
+  - rayclusters/status
+  - raycronjobs/status
+  - rayjobs/status
+  - rayservices/status
+  verbs:
+  - get
+  - patch
+  - update
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:
