@@ -49,10 +49,26 @@ import (
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services;configmaps;serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
-// Cluster-scoped Ray CRs record events in namespace "default".
-// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// Cluster-scoped Ray CRs record events in namespace "default". Operand
+// kuberay-operator ClusterRole also lists events; privilege-escalation
+// requires matching verbs on the module SA.
+// +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
-// Operand ClusterRoles (kuberay-edit-role) grant these; the module SA must hold them to apply those roles.
+// Operand ClusterRoles the module SSA-applies. Kubernetes privilege-escalation
+// rules require the applier to already hold the same verbs.
+// +kubebuilder:rbac:groups="",resources=pods;pods/status;pods/proxy;pods/resize;secrets;services/proxy;services/status,verbs=get;list;watch;create;update;patch;delete;deletecollection
+// +kubebuilder:rbac:groups=authentication.k8s.io,resources=tokenreviews,verbs=create
+// +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=cert-manager.io,resources=certificates;issuers,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=cert-manager.io,resources=certificates/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=discovery.k8s.io,resources=endpointslices,verbs=get;list;watch
+// +kubebuilder:rbac:groups=extensions,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways;httproutes;referencegrants,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses;ingressclasses;networkpolicies,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=operator.openshift.io,resources=kubeapiservers;kubeapiservers/status,verbs=get;list;watch
+// +kubebuilder:rbac:groups=config.openshift.io,resources=apiservers,verbs=get;list;watch
+// +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=ray.io,resources=rayclusters;rayjobs;rayservices;raycronjobs,verbs=get;list;watch;create;update;patch;delete;deletecollection
 // +kubebuilder:rbac:groups=ray.io,resources=rayclusters/finalizers;rayjobs/finalizers;rayservices/finalizers;raycronjobs/finalizers,verbs=get;update
 // +kubebuilder:rbac:groups=ray.io,resources=rayclusters/status;rayjobs/status;rayservices/status;raycronjobs/status,verbs=get;update;patch
@@ -103,16 +119,7 @@ func SetupWithManager(ctx context.Context, mgr ctrl.Manager, manifestsBasePath s
 		WithAction(distributionAction(manifestsBasePath)).
 		WithAction(degradedAction()).
 		WithAction(observedGenerationAction()).
-		WithAction(gc.NewAction(
-			nsFn,
-			gc.WithDeletePropagationPolicy(metav1.DeletePropagationBackground),
-			// Removed (generation bump) must collect labeled webhooks/SCC even
-			// when they have no ownerRef. Managed is still gated by the default
-			// generation predicate. OwnerRefs are possible (cluster-scoped Ray +
-			// dynamic ownership) but cascade waits on the CR finalizer, and
-			// in-tree leftovers may only carry the part-of label.
-			gc.WithOnlyCollectOwned(false),
-		)).
+		WithAction(reconcileGCAction(nsFn)).
 		WithFinalizer(deletionCleanupAction(nsFn)).
 		Build(ctx)
 
@@ -129,6 +136,24 @@ func waitForNamespace(_ context.Context, rr *types.ReconciliationRequest) bool {
 	ray := rr.Instance.(*componentsv1alpha1.Ray)
 
 	return ray.Spec.ApplicationsNamespace == ""
+}
+
+// reconcileGCAction uses owned-only GC while Managed so kube-generated
+// children (EndpointSlices) and unlabeled leftovers are not deleted on
+// every pass. Removed still collects labeled webhooks/SCC without ownerRef.
+func reconcileGCAction(nsFn actions.Getter[string]) actions.Fn {
+	bg := gc.WithDeletePropagationPolicy(metav1.DeletePropagationBackground)
+	managedGC := gc.NewAction(nsFn, bg)
+	removedGC := gc.NewAction(nsFn, bg, gc.WithOnlyCollectOwned(false))
+
+	return func(ctx context.Context, rr *types.ReconciliationRequest) error {
+		removed, _ := rr.Extensions[constants.ExtKeyRemoved].(bool)
+		if removed {
+			return removedGC(ctx, rr)
+		}
+
+		return managedGC(ctx, rr)
+	}
 }
 
 // deletionCleanupAction runs on Ray CR deletion. The framework delete path

@@ -44,6 +44,7 @@ const (
 	interval       = 250 * time.Millisecond
 	webhookName    = "ray-kuberay-validating"
 	lifecycleCRD   = "fakes.lifecycle.ray.test.io"
+	strayCMName    = "stray-part-of-ray"
 	inTreeImage    = "quay.io/opendatahub/kuberay-operator:in-tree"
 	managedImage   = "quay.io/opendatahub/kuberay-operator:test"
 	deploymentName = "kuberay-operator"
@@ -280,6 +281,25 @@ var _ = Describe("Ray Controller", Ordered, func() {
 		})
 	})
 
+	Context("when Managed GC runs", func() {
+		It("should not delete labeled objects it does not own", func() {
+			stray := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      strayCMName,
+					Namespace: testNamespace,
+					Labels: map[string]string{
+						gc.DefaultPartOfLabelKey: constants.ComponentName,
+					},
+					Annotations: map[string]string{"unmanaged": "true"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, stray)).To(Succeed())
+			Consistently(func() error {
+				return k8sClient.Get(ctx, types.NamespacedName{Name: strayCMName, Namespace: testNamespace}, &corev1.ConfigMap{})
+			}, 5*time.Second, interval).Should(Succeed())
+		})
+	})
+
 	Context("when managementState is Removed", func() {
 		It("should clean up labeled operands but keep CRDs", func() {
 			By("waiting for any pending reconciles to settle")
@@ -304,6 +324,9 @@ var _ = Describe("Ray Controller", Ordered, func() {
 			}, timeout, interval).Should(BeTrue())
 			Eventually(func() bool {
 				return isNotFound(&admissionregistrationv1.ValidatingWebhookConfiguration{}, webhookName, "")
+			}, timeout, interval).Should(BeTrue())
+			Eventually(func() bool {
+				return isNotFound(&corev1.ConfigMap{}, strayCMName, testNamespace)
 			}, timeout, interval).Should(BeTrue())
 
 			By("verifying the labeled CRD is kept")
