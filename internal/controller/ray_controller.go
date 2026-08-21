@@ -28,8 +28,10 @@ import (
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/conditions"
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/reconciler"
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/types"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	componentsv1alpha1 "github.com/opendatahub-io/ray-module-operator/api/v1alpha1"
 	"github.com/opendatahub-io/ray-module-operator/internal/constants"
@@ -53,21 +55,32 @@ import (
 // +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 
 // SetupWithManager wires the Ray reconciler pipeline into the controller
-// manager. The pipeline is: management state → manifest init → kustomize
-// render → deploy (SSA) → deployment status → garbage collect.
+// manager. The pipeline is: management state → releases → manifest init →
+// kustomize render → deploy (SSA) → deployment status → distribution →
+// Degraded → observedGeneration → garbage collect.
 func SetupWithManager(ctx context.Context, mgr ctrl.Manager, manifestsBasePath string) error {
 	nsFn := namespaceFn
 
 	_, err := reconciler.ReconcilerFor(mgr, &componentsv1alpha1.Ray{}).
 		WithInstanceName(constants.InstanceName).
-		WithConditions(constants.ConditionDeploymentsAvailable).
+		WithConditions(
+			string(common.ConditionTypeProvisioningSucceeded),
+			constants.ConditionDeploymentsAvailable,
+			constants.ConditionDegraded,
+		).
 		WithDynamicOwnership().
+		Watches(
+			&corev1.ConfigMap{},
+			reconciler.WithEventMapper(platformConfigMapper(mgr.GetClient())),
+			reconciler.WithPredicates(predicate.NewPredicateFuncs(platformConfigPredicate)),
+		).
 		WithReconcilerOpts(
 			reconciler.WithRelease(frameworkapi.Release{Name: "opendatahub"}),
 			reconciler.WithPreApplyFn(waitForNamespace),
 			reconciler.WithPreApplyFailedReason("ApplicationsNamespaceNotProjected"),
 		).
 		WithAction(managementStateAction()).
+		WithAction(releasesAction(manifestsBasePath)).
 		WithAction(manifestInitAction()).
 		WithAction(applyImageParamsAction(manifestsBasePath)).
 		WithAction(RenderKustomize(manifestsBasePath, nsFn)).
@@ -77,6 +90,9 @@ func SetupWithManager(ctx context.Context, mgr ctrl.Manager, manifestsBasePath s
 			deploy.WithApplyOrder(),
 		)).
 		WithAction(deploymentStatusAction(nsFn)).
+		WithAction(distributionAction(manifestsBasePath)).
+		WithAction(degradedAction()).
+		WithAction(observedGenerationAction()).
 		WithAction(gc.NewAction(
 			nsFn,
 			gc.WithDeletePropagationPolicy(metav1.DeletePropagationBackground),

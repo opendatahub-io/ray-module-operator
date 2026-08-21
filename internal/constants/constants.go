@@ -26,6 +26,24 @@ const (
 	ManifestOverlay   = "openshift"
 
 	ConditionDeploymentsAvailable = "DeploymentsAvailable"
+	ConditionDegraded             = "Degraded"
 
 	ExtKeyRemoved = "ray.removed"
+
+	// PlatformConfigMapName is the ConfigMap the module operator reads for
+	// distribution handshake. In production the platform operator overwrites
+	// these values; the module ships a default copy for standalone operation.
+	PlatformConfigMapName = "opendatahub-ray-config"
+	PlatformNameKey       = "distribution.name"
+	PlatformVersionKey    = "distribution.version"
+
+	StandaloneDistributionName = "Standalone"
+
+	StandaloneDistributionVersion = "0.0.0"
+
+	KubeRayReleaseName = "KubeRay"
+	KubeRayRepoURL     = "https://github.com/opendatahub-io/kuberay"
+	KubeRayImageParam  = "odh-kuberay-operator-controller-image"
+
+	MaxReleaseVersionLength = 64
 )
