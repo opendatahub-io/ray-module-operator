@@ -39,16 +39,17 @@ import (
 )
 
 const (
-	testNamespace  = "test-ray-ns"
-	timeout        = 60 * time.Second
-	interval       = 250 * time.Millisecond
-	webhookName    = "ray-kuberay-validating"
-	lifecycleCRD   = "fakes.lifecycle.ray.test.io"
-	strayCMName    = "stray-part-of-ray"
-	inTreeImage    = "quay.io/opendatahub/kuberay-operator:in-tree"
-	managedImage   = "quay.io/opendatahub/kuberay-operator:test"
-	deploymentName = "kuberay-operator"
-	configMapName  = "ray-operator-config"
+	testNamespace      = "test-ray-ns"
+	timeout            = 60 * time.Second
+	interval           = 250 * time.Millisecond
+	webhookName        = "ray-kuberay-validating"
+	lifecycleCRD       = "fakes.lifecycle.ray.test.io"
+	strayCMName        = "stray-part-of-ray"
+	inTreeImage        = "quay.io/opendatahub/kuberay-operator:in-tree"
+	managedImage       = "quay.io/opendatahub/kuberay-operator:test"
+	deploymentName     = "kuberay-operator"
+	configMapName      = "ray-operator-config"
+	testKickAnnotation = "test.opendatahub.io/kick"
 )
 
 var _ = Describe("Ray Controller", Ordered, func() {
@@ -95,7 +96,7 @@ var _ = Describe("Ray Controller", Ordered, func() {
 	Context("when applicationsNamespace is not projected", func() {
 		It("should not deploy and should delete without sticking", func() {
 			By("creating Ray CR without applicationsNamespace")
-			Expect(k8sClient.Create(ctx, newRayCR(""))).To(Succeed())
+			createRayCR("")
 
 			By("verifying no deployment is created in the test namespace")
 			Consistently(func() bool {
@@ -117,6 +118,12 @@ var _ = Describe("Ray Controller", Ordered, func() {
 			Eventually(func() bool {
 				return isNotFound(&componentsv1alpha1.Ray{}, constants.InstanceName, "")
 			}, timeout, interval).Should(BeTrue())
+
+			// Recreating default-ray in the next spec must not race a
+			// tombstone still sitting in the informer.
+			Consistently(func() bool {
+				return isNotFound(&componentsv1alpha1.Ray{}, constants.InstanceName, "")
+			}, time.Second, interval).Should(BeTrue())
 		})
 	})
 
@@ -129,7 +136,7 @@ var _ = Describe("Ray Controller", Ordered, func() {
 			Expect(originalUID).NotTo(BeEmpty())
 
 			By("creating Ray CR with applicationsNamespace")
-			Expect(k8sClient.Create(ctx, newRayCR(testNamespace))).To(Succeed())
+			createRayCR(testNamespace)
 
 			By("verifying the Deployment is adopted (same UID, spec and part-of label taken over)")
 			Eventually(func(g Gomega) {
@@ -373,7 +380,7 @@ var _ = Describe("Ray Controller", Ordered, func() {
 	Context("when the Ray CR is deleted while Managed", func() {
 		It("should clean up operands including the webhook, then remove the CR", func() {
 			By("creating a Managed Ray CR with operands")
-			Expect(k8sClient.Create(ctx, newRayCR(testNamespace))).To(Succeed())
+			createRayCR(testNamespace)
 
 			Eventually(func() error {
 				dep := &appsv1.Deployment{}
@@ -439,6 +446,39 @@ func newRayCR(applicationsNamespace string) *componentsv1alpha1.Ray {
 			ApplicationsNamespace: applicationsNamespace,
 		},
 	}
+}
+
+// createRayCR creates default-ray. When applicationsNamespace is set, it
+// also patches the CR: a same-name recreate after the previous Ordered spec
+// can consume the informer Add while Get still returns NotFound, so apply
+// never runs. Empty-namespace creates are left alone so that patch does not
+// conflict with dropping the unused finalizer.
+func createRayCR(applicationsNamespace string) {
+	GinkgoHelper()
+	Expect(k8sClient.Create(ctx, newRayCR(applicationsNamespace))).To(Succeed())
+	if applicationsNamespace == "" {
+		return
+	}
+
+	Eventually(func(g Gomega) {
+		ray := &componentsv1alpha1.Ray{}
+		g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: constants.InstanceName}, ray)).To(Succeed())
+		if ray.Annotations[testKickAnnotation] == "1" {
+			return
+		}
+		base := ray.DeepCopy()
+		if ray.Annotations == nil {
+			ray.Annotations = map[string]string{}
+		}
+		ray.Annotations[testKickAnnotation] = "1"
+		g.Expect(k8sClient.Patch(ctx, ray, client.MergeFrom(base))).To(Succeed())
+	}, timeout, interval).Should(Succeed())
+
+	Eventually(func(g Gomega) {
+		ray := &componentsv1alpha1.Ray{}
+		g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: constants.InstanceName}, ray)).To(Succeed())
+		g.Expect(controllerutil.ContainsFinalizer(ray, constants.FinalizerName)).To(BeTrue())
+	}, timeout, interval).Should(Succeed())
 }
 
 func inTreeDeployment() *appsv1.Deployment {
