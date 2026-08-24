@@ -93,7 +93,7 @@ var _ = Describe("Ray Controller", Ordered, func() {
 	})
 
 	Context("when applicationsNamespace is not projected", func() {
-		It("should not deploy, should register a finalizer, and should delete without sticking", func() {
+		It("should not deploy and should delete without sticking", func() {
 			By("creating Ray CR without applicationsNamespace")
 			Expect(k8sClient.Create(ctx, newRayCR(""))).To(Succeed())
 
@@ -102,11 +102,11 @@ var _ = Describe("Ray Controller", Ordered, func() {
 				return isNotFound(&appsv1.Deployment{}, deploymentName, testNamespace)
 			}, 5*time.Second, interval).Should(BeTrue())
 
-			By("verifying the deletion finalizer is registered")
+			By("verifying the deletion finalizer is not kept while nothing is deployed")
 			Eventually(func(g Gomega) {
 				ray := &componentsv1alpha1.Ray{}
 				g.Expect(k8sClient.Get(ctx, rayCR, ray)).To(Succeed())
-				g.Expect(controllerutil.ContainsFinalizer(ray, constants.FinalizerName)).To(BeTrue())
+				g.Expect(controllerutil.ContainsFinalizer(ray, constants.FinalizerName)).To(BeFalse())
 			}, timeout, interval).Should(Succeed())
 
 			By("deleting the CR while namespace is still unprojected")

@@ -29,9 +29,11 @@ import (
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/reconciler"
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/types"
 	corev1 "k8s.io/api/core/v1"
+	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	componentsv1alpha1 "github.com/opendatahub-io/ray-module-operator/api/v1alpha1"
@@ -132,10 +134,22 @@ func namespaceFn(_ context.Context, rr *types.ReconciliationRequest) (string, er
 	return ray.Spec.ApplicationsNamespace, nil
 }
 
-func waitForNamespace(_ context.Context, rr *types.ReconciliationRequest) bool {
+func waitForNamespace(ctx context.Context, rr *types.ReconciliationRequest) bool {
 	ray := rr.Instance.(*componentsv1alpha1.Ray)
+	if ray.Spec.ApplicationsNamespace != "" {
+		return false
+	}
 
-	return ray.Spec.ApplicationsNamespace == ""
+	// The framework adds the finalizer before PreApply. Drop it while nothing
+	// is deployed; otherwise a stale apply after Delete never takes the
+	// delete path and the CR sticks.
+	if controllerutil.RemoveFinalizer(ray, constants.FinalizerName) {
+		if err := rr.Client.Update(ctx, ray); err != nil && !k8serr.IsConflict(err) && !k8serr.IsNotFound(err) {
+			return true
+		}
+	}
+
+	return true
 }
 
 // reconcileGCAction uses owned-only GC while Managed so kube-generated
