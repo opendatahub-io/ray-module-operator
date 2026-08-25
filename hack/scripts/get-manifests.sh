@@ -158,4 +158,18 @@ rm -rf "${DST_MANIFESTS_DIR}"/*/e2e "${DST_MANIFESTS_DIR}"/*/scorecard \
        "${DST_MANIFESTS_DIR}"/*/example-*
 find "${DST_MANIFESTS_DIR}" -name "README.md" -delete 2>/dev/null || true
 
+# Strip TLS metrics patch: the vendored manifests add --metrics-cert-path but
+# no published kuberay image supports it yet. Remove the kustomize reference
+# so the operator deploys without cert-manager TLS on the metrics endpoint.
+for kust in "${DST_MANIFESTS_DIR}"/*/openshift/kustomization.yaml; do
+    if [ -f "$kust" ]; then
+        python3 -c "
+import re, sys
+text = open(sys.argv[1]).read()
+text = re.sub(r'- path: tls-metrics-patch\.yaml\n(?:  [^\n]*\n)*', '', text)
+open(sys.argv[1], 'w').write(text)
+" "$kust"
+    fi
+done
+
 echo "Manifests downloaded to ${DST_MANIFESTS_DIR}"
