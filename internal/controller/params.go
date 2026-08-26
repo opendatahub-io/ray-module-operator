@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/actions"
@@ -31,6 +32,12 @@ import (
 	"github.com/opendatahub-io/ray-module-operator/internal/constants"
 )
 
+// extKeyWritableManifests is the ReconciliationRequest extension that holds a
+// writable copy of ManifestsBasePath. OpenShift restricted SCC runs as a
+// random uid and the image tree is read-only, so params.env cannot be
+// rewritten in place.
+const extKeyWritableManifests = "ray.writableManifests"
+
 // imageParamMap maps params.env keys to the RELATED_IMAGE_* environment
 // variables that Konflux / CSV injection sets at runtime.
 var imageParamMap = map[string]string{
@@ -38,9 +45,9 @@ var imageParamMap = map[string]string{
 	"odh-kube-rbac-proxy-image":             "RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE",
 }
 
-// applyImageParamsAction rewrites params.env on disk before kustomize
-// renders manifests, injecting the target namespace and any RELATED_IMAGE_*
-// overrides. This matches the ODH operator's ApplyParams pattern.
+// applyImageParamsAction copies vendored manifests to a writable temp dir,
+// then rewrites params.env there before kustomize renders. This matches the
+// ODH operator's ApplyParams pattern without mutating the image filesystem.
 func applyImageParamsAction(basePath string) actions.Fn {
 	return func(_ context.Context, rr *types.ReconciliationRequest) error {
 		removed, _ := rr.Extensions[constants.ExtKeyRemoved].(bool)
@@ -48,13 +55,78 @@ func applyImageParamsAction(basePath string) actions.Fn {
 			return nil
 		}
 
-		ray := rr.Instance.(*componentsv1alpha1.Ray)
-		componentPath := filepath.Join(basePath, constants.ManifestPath, constants.ManifestOverlay)
+		writableBase, err := writableManifestsBase(basePath)
+		if err != nil {
+			return err
+		}
 
-		return applyParams(componentPath, imageParamMap,
-			map[string]string{"namespace": ray.Spec.ApplicationsNamespace},
-		)
+		if rr.Extensions == nil {
+			rr.Extensions = make(map[string]any)
+		}
+		rr.Extensions[extKeyWritableManifests] = writableBase
+
+		ray := rr.Instance.(*componentsv1alpha1.Ray)
+		ns := ray.Spec.ApplicationsNamespace
+		componentPath := filepath.Join(writableBase, constants.ManifestPath, constants.ManifestOverlay)
+
+		if err := applyParams(componentPath, imageParamMap, map[string]string{"namespace": ns}); err != nil {
+			return err
+		}
+		// RHOAI overlays hardcode namespace: redhat-ods-applications; params.env
+		// alone does not change kustomize's namespace transformer.
+		return setOverlayNamespace(componentPath, ns)
 	}
+}
+
+var overlayNamespaceRe = regexp.MustCompile(`(?m)^namespace:\s*\S+`)
+
+func setOverlayNamespace(overlayDir, ns string) error {
+	if ns == "" {
+		return nil
+	}
+
+	path := filepath.Join(overlayDir, "kustomization.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	replacement := []byte("namespace: " + ns)
+	var updated []byte
+	if overlayNamespaceRe.Match(data) {
+		updated = overlayNamespaceRe.ReplaceAll(data, replacement)
+	} else {
+		updated = append(append(data, '\n'), append(replacement, '\n')...)
+	}
+
+	return os.WriteFile(path, updated, 0o644)
+}
+
+// writableManifestsBase copies basePath into os.TempDir so later writes
+// (params.env) and kustomize reads share one tree. The image path stays
+// untouched (read-only root FS / non-root uid).
+func writableManifestsBase(basePath string) (string, error) {
+	dst := filepath.Join(os.TempDir(), "ray-module-manifests")
+	if _, err := os.Stat(dst); err == nil {
+		return dst, nil
+	}
+
+	if err := copyDir(basePath, dst); err != nil {
+		return "", fmt.Errorf("copy manifests to %s: %w", dst, err)
+	}
+
+	return dst, nil
+}
+
+func copyDir(src, dst string) error {
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+
+	return os.CopyFS(dst, os.DirFS(src))
 }
 
 // applyParams reads a key=value params file, overrides values from

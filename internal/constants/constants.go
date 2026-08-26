@@ -30,6 +30,11 @@ const (
 
 	ExtKeyRemoved = "ray.removed"
 
+	// FinalizerName is the platform-contract finalizer. It keeps the Ray CR
+	// alive until owned operands (including cluster-scoped webhooks/SCC) are
+	// cleaned up. CRDs are not removed.
+	FinalizerName = "platform.opendatahub.io/finalizer"
+
 	// PlatformConfigMapName is the ConfigMap the module operator reads for
 	// distribution handshake. In production the platform operator overwrites
 	// these values; the module ships a default copy for standalone operation.

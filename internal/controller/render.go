@@ -24,6 +24,7 @@ import (
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/actions"
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/types"
 	"github.com/opendatahub-io/odh-platform-utilities/pkg/render/kustomize"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 // RenderKustomize returns an action that renders Kustomize manifests from
@@ -43,6 +44,10 @@ func RenderKustomize(basePath string, namespaceFn actions.Getter[string]) action
 		}
 
 		engine := kustomize.NewEngine()
+		renderBase := basePath
+		if p, ok := rr.Extensions[extKeyWritableManifests].(string); ok && p != "" {
+			renderBase = p
+		}
 
 		for _, m := range rr.Manifests {
 			path := m.Path
@@ -52,12 +57,15 @@ func RenderKustomize(basePath string, namespaceFn actions.Getter[string]) action
 			if m.SourcePath != "" {
 				path = filepath.Join(path, m.SourcePath)
 			}
-			path = filepath.Join(basePath, path)
+			path = filepath.Join(renderBase, path)
 
 			resources, err := engine.Render(path, kustomize.WithNamespace(ns))
 			if err != nil {
 				return fmt.Errorf("render manifests from %s: %w", path, err)
 			}
+			// RHOAI operand YAML hardcodes redhat-ods-applications on some
+			// namespaced objects; kustomize does not always override those.
+			forceNamespacedResources(ns, resources)
 
 			rr.Resources = append(rr.Resources, resources...)
 		}
@@ -65,5 +73,17 @@ func RenderKustomize(basePath string, namespaceFn actions.Getter[string]) action
 		rr.Generated = true
 
 		return nil
+	}
+}
+
+func forceNamespacedResources(ns string, objs []unstructured.Unstructured) {
+	if ns == "" {
+		return
+	}
+
+	for i := range objs {
+		if objs[i].GetNamespace() != "" {
+			objs[i].SetNamespace(ns)
+		}
 	}
 }

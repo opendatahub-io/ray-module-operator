@@ -29,8 +29,11 @@ import (
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/reconciler"
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/types"
 	corev1 "k8s.io/api/core/v1"
+	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	componentsv1alpha1 "github.com/opendatahub-io/ray-module-operator/api/v1alpha1"
@@ -48,6 +51,29 @@ import (
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services;configmaps;serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
+// Cluster-scoped Ray CRs record events in namespace "default". Operand
+// kuberay-operator ClusterRole also lists events; privilege-escalation
+// requires matching verbs on the module SA.
+// +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
+// Operand ClusterRoles the module SSA-applies. Kubernetes privilege-escalation
+// rules require the applier to already hold the same verbs.
+// +kubebuilder:rbac:groups="",resources=pods;pods/status;pods/proxy;pods/resize;secrets;services/proxy;services/status,verbs=get;list;watch;create;update;patch;delete;deletecollection
+// +kubebuilder:rbac:groups=authentication.k8s.io,resources=tokenreviews,verbs=create
+// +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=cert-manager.io,resources=certificates;issuers,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=cert-manager.io,resources=certificates/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=discovery.k8s.io,resources=endpointslices,verbs=get;list;watch
+// +kubebuilder:rbac:groups=extensions,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways;httproutes;referencegrants,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses;ingressclasses;networkpolicies,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=operator.openshift.io,resources=kubeapiservers;kubeapiservers/status,verbs=get;list;watch
+// +kubebuilder:rbac:groups=config.openshift.io,resources=apiservers,verbs=get;list;watch
+// +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=ray.io,resources=rayclusters;rayjobs;rayservices;raycronjobs,verbs=get;list;watch;create;update;patch;delete;deletecollection
+// +kubebuilder:rbac:groups=ray.io,resources=rayclusters/finalizers;rayjobs/finalizers;rayservices/finalizers;raycronjobs/finalizers,verbs=get;update
+// +kubebuilder:rbac:groups=ray.io,resources=rayclusters/status;rayjobs/status;rayservices/status;raycronjobs/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles;clusterrolebindings;roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=mutatingwebhookconfigurations;validatingwebhookconfigurations,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch;create;update;patch
@@ -56,8 +82,9 @@ import (
 
 // SetupWithManager wires the Ray reconciler pipeline into the controller
 // manager. The pipeline is: management state → releases → manifest init →
-// kustomize render → deploy (SSA) → deployment status → distribution →
-// Degraded → observedGeneration → garbage collect.
+// kustomize render → deploy (SSA, ForceOwnership) → deployment status →
+// distribution → Degraded → observedGeneration → garbage collect.
+// WithFinalizer cleans owned operands on Ray CR deletion (webhooks, SCC); CRDs stay.
 func SetupWithManager(ctx context.Context, mgr ctrl.Manager, manifestsBasePath string) error {
 	nsFn := namespaceFn
 
@@ -76,6 +103,7 @@ func SetupWithManager(ctx context.Context, mgr ctrl.Manager, manifestsBasePath s
 		).
 		WithReconcilerOpts(
 			reconciler.WithRelease(frameworkapi.Release{Name: "opendatahub"}),
+			reconciler.WithFinalizerName(constants.FinalizerName),
 			reconciler.WithPreApplyFn(waitForNamespace),
 			reconciler.WithPreApplyFailedReason("ApplicationsNamespaceNotProjected"),
 		).
@@ -93,10 +121,8 @@ func SetupWithManager(ctx context.Context, mgr ctrl.Manager, manifestsBasePath s
 		WithAction(distributionAction(manifestsBasePath)).
 		WithAction(degradedAction()).
 		WithAction(observedGenerationAction()).
-		WithAction(gc.NewAction(
-			nsFn,
-			gc.WithDeletePropagationPolicy(metav1.DeletePropagationBackground),
-		)).
+		WithAction(reconcileGCAction(nsFn)).
+		WithFinalizer(deletionCleanupAction(nsFn)).
 		Build(ctx)
 
 	return err
@@ -108,10 +134,71 @@ func namespaceFn(_ context.Context, rr *types.ReconciliationRequest) (string, er
 	return ray.Spec.ApplicationsNamespace, nil
 }
 
-func waitForNamespace(_ context.Context, rr *types.ReconciliationRequest) bool {
+func waitForNamespace(ctx context.Context, rr *types.ReconciliationRequest) bool {
 	ray := rr.Instance.(*componentsv1alpha1.Ray)
+	if ray.Spec.ApplicationsNamespace != "" {
+		return false
+	}
 
-	return ray.Spec.ApplicationsNamespace == ""
+	// The framework adds the finalizer before PreApply. Drop it while nothing
+	// is deployed; otherwise a stale apply after Delete never takes the
+	// delete path and the CR sticks.
+	if controllerutil.RemoveFinalizer(ray, constants.FinalizerName) {
+		if err := rr.Client.Update(ctx, ray); err != nil && !k8serr.IsConflict(err) && !k8serr.IsNotFound(err) {
+			return true
+		}
+	}
+
+	return true
+}
+
+// reconcileGCAction uses owned-only GC while Managed so kube-generated
+// children (EndpointSlices) and unlabeled leftovers are not deleted on
+// every pass. Removed still collects labeled webhooks/SCC without ownerRef.
+func reconcileGCAction(nsFn actions.Getter[string]) actions.Fn {
+	bg := gc.WithDeletePropagationPolicy(metav1.DeletePropagationBackground)
+	managedGC := gc.NewAction(nsFn, bg)
+	removedGC := gc.NewAction(nsFn, bg, gc.WithOnlyCollectOwned(false))
+
+	return func(ctx context.Context, rr *types.ReconciliationRequest) error {
+		removed, _ := rr.Extensions[constants.ExtKeyRemoved].(bool)
+		if removed {
+			return removedGC(ctx, rr)
+		}
+
+		return managedGC(ctx, rr)
+	}
+}
+
+// deletionCleanupAction runs on Ray CR deletion. The framework delete path
+// does not run the reconcile pipeline, so Generated is false and the default
+// GC generation predicate would skip current operands. Force Generated and
+// delete labeled operands (webhooks, SCC) even without ownerRef; CRDs stay.
+// Empty applicationsNamespace means nothing was deployed — skip GC so the
+// finalizer cannot stick.
+func deletionCleanupAction(nsFn actions.Getter[string]) actions.Fn {
+	gcFn := gc.NewAction(
+		nsFn,
+		gc.WithDeletePropagationPolicy(metav1.DeletePropagationBackground),
+		gc.WithOnlyCollectOwned(false),
+		gc.WithObjectPredicate(func(_ *types.ReconciliationRequest, _ unstructured.Unstructured) (bool, error) {
+			return true, nil
+		}),
+	)
+
+	return func(ctx context.Context, rr *types.ReconciliationRequest) error {
+		ns, err := nsFn(ctx, rr)
+		if err != nil {
+			return err
+		}
+		if ns == "" {
+			return nil
+		}
+
+		rr.Generated = true
+
+		return gcFn(ctx, rr)
+	}
 }
 
 func managementStateAction() actions.Fn {

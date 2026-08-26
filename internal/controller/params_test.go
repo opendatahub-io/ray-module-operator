@@ -19,6 +19,7 @@ package controller
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -102,5 +103,72 @@ func TestApplyParams_MissingFileReturnsNil(t *testing.T) {
 	err := applyParams(dir, imageParamMap)
 	if err != nil {
 		t.Fatalf("expected nil for missing file, got: %v", err)
+	}
+}
+
+func TestWritableManifestsBase_DoesNotMutateReadOnlySource(t *testing.T) {
+	base := t.TempDir()
+	overlay := filepath.Join(base, "kuberay", "openshift")
+	original := "namespace=opendatahub\nodh-kuberay-operator-controller-image=quay.io/default:v1\n"
+	writeTestParams(t, overlay, original)
+
+	if err := os.Chmod(filepath.Join(overlay, "params.env"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(overlay, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(overlay, 0o755)
+		_ = os.Chmod(filepath.Join(overlay, "params.env"), 0o644)
+	})
+
+	t.Setenv("TMPDIR", t.TempDir())
+
+	dst, err := writableManifestsBase(base)
+	if err != nil {
+		t.Fatalf("writableManifestsBase: %v", err)
+	}
+
+	err = applyParams(filepath.Join(dst, "kuberay", "openshift"), nil, map[string]string{"namespace": "ray-module-test"})
+	if err != nil {
+		t.Fatalf("applyParams on copy: %v", err)
+	}
+
+	gotCopy := readTestParams(t, filepath.Join(dst, "kuberay", "openshift"))
+	if gotCopy["namespace"] != "ray-module-test" {
+		t.Errorf("copy namespace = %q, want ray-module-test", gotCopy["namespace"])
+	}
+
+	srcFile := filepath.Join(overlay, "params.env")
+	raw, err := os.ReadFile(srcFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != original {
+		t.Errorf("source params.env mutated:\n%s", raw)
+	}
+}
+
+func TestSetOverlayNamespace_RewritesHardcodedNamespace(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kustomization.yaml")
+	if err := os.WriteFile(path, []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nnamespace: redhat-ods-applications\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := setOverlayNamespace(dir, "ray-module-test"); err != nil {
+		t.Fatalf("setOverlayNamespace: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "namespace: ray-module-test\n"; !strings.Contains(string(got), want) {
+		t.Errorf("kustomization.yaml = %q, want substring %q", got, want)
+	}
+	if strings.Contains(string(got), "redhat-ods-applications") {
+		t.Errorf("hardcoded namespace still present: %s", got)
 	}
 }

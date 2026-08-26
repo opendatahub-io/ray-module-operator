@@ -92,11 +92,15 @@ spec:
         resources:
           limits:
             cpu: 500m
-            memory: 128Mi
+            memory: 2Gi
           requests:
             cpu: 10m
-            memory: 64Mi
-        volumeMounts: []
-      volumes: []
+            memory: 256Mi
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
