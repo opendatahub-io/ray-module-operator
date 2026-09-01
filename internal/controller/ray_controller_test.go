@@ -186,6 +186,7 @@ var _ = Describe("Ray Controller", Ordered, func() {
 				cr := &rbacv1.ClusterRole{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: notebookClusterRoleName}, cr)).To(Succeed())
 				g.Expect(cr.Labels[gc.DefaultPartOfLabelKey]).To(Equal(constants.ComponentName))
+				g.Expect(cr.OwnerReferences).To(BeEmpty())
 				g.Expect(cr.Rules).To(HaveLen(3))
 			}, timeout, interval).Should(Succeed())
 

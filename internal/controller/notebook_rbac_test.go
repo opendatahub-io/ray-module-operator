@@ -71,15 +71,8 @@ func TestNotebookClusterRole(t *testing.T) {
 		t.Errorf("secrets verbs = %v, want %v", got, want)
 	}
 
-	u, err := notebookClusterRoleUnstructured()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if u.GetKind() != "ClusterRole" || u.GetName() != notebookClusterRoleName {
-		t.Fatalf("unstructured GVK/name = %s %s", u.GetKind(), u.GetName())
-	}
-	if u.GetNamespace() != "" {
-		t.Fatalf("ClusterRole namespace = %q, want empty", u.GetNamespace())
+	if cr.Namespace != "" {
+		t.Fatalf("ClusterRole namespace = %q, want empty", cr.Namespace)
 	}
 }
 

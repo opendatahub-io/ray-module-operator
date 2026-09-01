@@ -26,8 +26,8 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
+	k8stypes "k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/opendatahub-io/ray-module-operator/internal/constants"
 )
@@ -44,20 +44,50 @@ func notebookClusterRoleAction() actions.Fn {
 			return deleteNotebookClusterRole(ctx, rr)
 		}
 
-		obj, err := notebookClusterRoleUnstructured()
-		if err != nil {
-			return err
-		}
-		rr.Resources = append(rr.Resources, obj)
-
-		return nil
+		return applyNotebookClusterRole(ctx, rr)
 	}
 }
 
-func deleteNotebookClusterRole(ctx context.Context, rr *types.ReconciliationRequest) error {
-	cr := &rbacv1.ClusterRole{
+func applyNotebookClusterRole(ctx context.Context, rr *types.ReconciliationRequest) error {
+	desired := notebookClusterRole()
+	existing := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{Name: notebookClusterRoleName},
 	}
+	_, err := controllerutil.CreateOrUpdate(ctx, rr.Client, existing, func() error {
+		existing.Labels = desired.Labels
+		existing.Rules = desired.Rules
+		// Cluster-scoped RBAC must not take a controller ownerRef: that
+		// sets blockOwnerDeletion and can pin default-ray in Terminating.
+		existing.OwnerReferences = nil
+
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("apply notebook ClusterRole %q: %w", notebookClusterRoleName, err)
+	}
+
+	return nil
+}
+
+func deleteNotebookClusterRole(ctx context.Context, rr *types.ReconciliationRequest) error {
+	cr := &rbacv1.ClusterRole{}
+	err := rr.Client.Get(ctx, k8stypes.NamespacedName{Name: notebookClusterRoleName}, cr)
+	if k8serr.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get notebook ClusterRole %q: %w", notebookClusterRoleName, err)
+	}
+
+	// Drop leftover controller ownerRefs (from older deploys that went
+	// through SSA) so default-ray is not pinned in Terminating.
+	if len(cr.OwnerReferences) > 0 {
+		cr.OwnerReferences = nil
+		if err := rr.Client.Update(ctx, cr); err != nil && !k8serr.IsNotFound(err) {
+			return fmt.Errorf("clear ownerRefs on notebook ClusterRole %q: %w", notebookClusterRoleName, err)
+		}
+	}
+
 	if err := rr.Client.Delete(ctx, cr); err != nil && !k8serr.IsNotFound(err) {
 		return fmt.Errorf("delete notebook ClusterRole %q: %w", notebookClusterRoleName, err)
 	}
@@ -96,13 +126,4 @@ func notebookClusterRole() *rbacv1.ClusterRole {
 			},
 		},
 	}
-}
-
-func notebookClusterRoleUnstructured() (unstructured.Unstructured, error) {
-	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(notebookClusterRole())
-	if err != nil {
-		return unstructured.Unstructured{}, fmt.Errorf("encode notebook ClusterRole: %w", err)
-	}
-
-	return unstructured.Unstructured{Object: obj}, nil
 }
