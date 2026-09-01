@@ -25,6 +25,7 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -180,6 +181,14 @@ var _ = Describe("Ray Controller", Ordered, func() {
 				return k8sClient.Get(ctx, types.NamespacedName{Name: webhookName}, wh)
 			}, timeout, interval).Should(Succeed())
 
+			By("verifying the notebook ClusterRole is created")
+			Eventually(func(g Gomega) {
+				cr := &rbacv1.ClusterRole{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: notebookClusterRoleName}, cr)).To(Succeed())
+				g.Expect(cr.Labels[gc.DefaultPartOfLabelKey]).To(Equal(constants.ComponentName))
+				g.Expect(cr.Rules).To(HaveLen(3))
+			}, timeout, interval).Should(Succeed())
+
 			By("verifying KubeRay is reported in status.releases")
 			Eventually(func(g Gomega) {
 				ray := &componentsv1alpha1.Ray{}
@@ -333,6 +342,9 @@ var _ = Describe("Ray Controller", Ordered, func() {
 				return isNotFound(&admissionregistrationv1.ValidatingWebhookConfiguration{}, webhookName, "")
 			}, timeout, interval).Should(BeTrue())
 			Eventually(func() bool {
+				return isNotFound(&rbacv1.ClusterRole{}, notebookClusterRoleName, "")
+			}, timeout, interval).Should(BeTrue())
+			Eventually(func() bool {
 				return isNotFound(&corev1.ConfigMap{}, strayCMName, testNamespace)
 			}, timeout, interval).Should(BeTrue())
 
@@ -409,6 +421,9 @@ var _ = Describe("Ray Controller", Ordered, func() {
 			}, timeout, interval).Should(BeTrue())
 			Eventually(func() bool {
 				return isNotFound(&admissionregistrationv1.ValidatingWebhookConfiguration{}, webhookName, "")
+			}, timeout, interval).Should(BeTrue())
+			Eventually(func() bool {
+				return isNotFound(&rbacv1.ClusterRole{}, notebookClusterRoleName, "")
 			}, timeout, interval).Should(BeTrue())
 			Eventually(func() bool {
 				return isNotFound(&componentsv1alpha1.Ray{}, constants.InstanceName, "")

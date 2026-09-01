@@ -82,7 +82,7 @@ import (
 
 // SetupWithManager wires the Ray reconciler pipeline into the controller
 // manager. The pipeline is: management state → releases → manifest init →
-// kustomize render → deploy (SSA, ForceOwnership) → deployment status →
+// kustomize render → notebook ClusterRole → deploy (SSA, ForceOwnership) → deployment status →
 // distribution → Degraded → observedGeneration → garbage collect.
 // WithFinalizer cleans owned operands on Ray CR deletion (webhooks, SCC); CRDs stay.
 func SetupWithManager(ctx context.Context, mgr ctrl.Manager, manifestsBasePath string) error {
@@ -112,6 +112,7 @@ func SetupWithManager(ctx context.Context, mgr ctrl.Manager, manifestsBasePath s
 		WithAction(manifestInitAction()).
 		WithAction(applyImageParamsAction(manifestsBasePath)).
 		WithAction(RenderKustomize(manifestsBasePath, nsFn)).
+		WithAction(notebookClusterRoleAction()).
 		WithAction(deploy.NewAction(
 			deploy.WithFieldOwner(constants.FieldOwner),
 			deploy.WithPartOfLabelDefault(constants.ComponentName),
