@@ -26,6 +26,7 @@ import (
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/actions/gc"
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/actions/status/deployments"
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/conditions"
+	fwpredicates "github.com/opendatahub-io/odh-platform-utilities/framework/controller/predicates"
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/reconciler"
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/types"
 	corev1 "k8s.io/api/core/v1"
@@ -33,7 +34,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	componentsv1alpha1 "github.com/opendatahub-io/ray-module-operator/api/v1alpha1"
@@ -82,13 +85,16 @@ import (
 
 // SetupWithManager wires the Ray reconciler pipeline into the controller
 // manager. The pipeline is: management state → releases → manifest init →
-// kustomize render → deploy (SSA, ForceOwnership) → deployment status →
+// kustomize render → notebook ClusterRole → deploy (SSA, ForceOwnership) → deployment status →
 // distribution → Degraded → observedGeneration → garbage collect.
 // WithFinalizer cleans owned operands on Ray CR deletion (webhooks, SCC); CRDs stay.
 func SetupWithManager(ctx context.Context, mgr ctrl.Manager, manifestsBasePath string) error {
 	nsFn := namespaceFn
 
-	_, err := reconciler.ReconcilerFor(mgr, &componentsv1alpha1.Ray{}).
+	_, err := reconciler.ReconcilerFor(mgr, &componentsv1alpha1.Ray{}, builder.WithPredicates(predicate.Or(
+		fwpredicates.DefaultPredicate,
+		deletionTimestampSetPredicate(),
+	))).
 		WithInstanceName(constants.InstanceName).
 		WithConditions(
 			string(common.ConditionTypeProvisioningSucceeded),
@@ -112,6 +118,7 @@ func SetupWithManager(ctx context.Context, mgr ctrl.Manager, manifestsBasePath s
 		WithAction(manifestInitAction()).
 		WithAction(applyImageParamsAction(manifestsBasePath)).
 		WithAction(RenderKustomize(manifestsBasePath, nsFn)).
+		WithAction(notebookClusterRoleAction()).
 		WithAction(deploy.NewAction(
 			deploy.WithFieldOwner(constants.FieldOwner),
 			deploy.WithPartOfLabelDefault(constants.ComponentName),
@@ -126,6 +133,22 @@ func SetupWithManager(ctx context.Context, mgr ctrl.Manager, manifestsBasePath s
 		Build(ctx)
 
 	return err
+}
+
+// deletionTimestampSetPredicate catches kubectl/client deletes. Framework
+// DefaultPredicate only fires on generation/label/annotation changes, so a
+// delete that only sets deletionTimestamp never ran the finalizer path —
+// which stuck "delete while already Removed" in envtest/CI.
+func deletionTimestampSetPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			if e.ObjectOld == nil || e.ObjectNew == nil {
+				return false
+			}
+
+			return e.ObjectOld.GetDeletionTimestamp().IsZero() && !e.ObjectNew.GetDeletionTimestamp().IsZero()
+		},
+	}
 }
 
 func namespaceFn(_ context.Context, rr *types.ReconciliationRequest) (string, error) {
@@ -193,6 +216,10 @@ func deletionCleanupAction(nsFn actions.Getter[string]) actions.Fn {
 		}
 		if ns == "" {
 			return nil
+		}
+
+		if err := deleteNotebookClusterRole(ctx, rr); err != nil {
+			return err
 		}
 
 		rr.Generated = true
