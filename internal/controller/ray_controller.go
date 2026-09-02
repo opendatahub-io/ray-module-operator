@@ -181,8 +181,12 @@ func waitForNamespace(ctx context.Context, rr *types.ReconciliationRequest) bool
 func reconcileGCAction(nsFn actions.Getter[string]) actions.Fn {
 	bg := gc.WithDeletePropagationPolicy(metav1.DeletePropagationBackground)
 	managedGC := gc.NewAction(nsFn, bg)
-	removedGC := gc.NewAction(nsFn, bg, gc.WithOnlyCollectOwned(false))
-
+	removedGC := gc.NewAction(nsFn, bg,
+		gc.WithOnlyCollectOwned(false),
+		gc.WithObjectPredicate(func(_ *types.ReconciliationRequest, _ unstructured.Unstructured) (bool, error) {
+			return true, nil
+		}),
+	)
 	return func(ctx context.Context, rr *types.ReconciliationRequest) error {
 		removed, _ := rr.Extensions[constants.ExtKeyRemoved].(bool)
 		if removed {

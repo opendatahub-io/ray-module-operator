@@ -1,15 +1,43 @@
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingWebhookConfiguration
+apiVersion: v1
+kind: Service
 metadata:
-  name: ray-kuberay-validating
+  name: kuberay-webhook-service
+  labels:
+    app.kubernetes.io/name: kuberay
+    app.kubernetes.io/component: webhook
+spec:
+  ports:
+    - name: webhook-server
+      port: 443
+      protocol: TCP
+      targetPort: 9443
+  selector:
+    app.kubernetes.io/component: kuberay-operator
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: kuberay-mutating-webhook-configuration
+  annotations:
+    cert-manager.io/inject-ca-from: opendatahub/serving-cert
 webhooks:
-  - name: raycluster.ray.opendatahub.io
+  - name: mraycluster.kb.io
     admissionReviewVersions:
       - v1
     clientConfig:
       service:
-        name: kuberay-webhook
-        namespace: default
-        path: /validate
+        name: kuberay-webhook-service
+        namespace: opendatahub
+        path: /mutate-ray-io-v1-raycluster
+    failurePolicy: Fail
+    rules:
+      - apiGroups:
+          - ray.io
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - rayclusters
     sideEffects: None
-    failurePolicy: Ignore
