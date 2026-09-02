@@ -26,16 +26,21 @@ import (
 	"github.com/opendatahub-io/odh-platform-utilities/pkg/render/kustomize"
 )
 
-const (
-	renderTestdataPath = "testdata/render"
-	testTargetNS       = "test-apps"
+var (
+	vendoredManifestsPath = filepath.Join("..", "..", "opt", "manifests", "kuberay")
+	testTargetNS          = "test-apps"
 )
 
 func renderWebhookTestdata(t *testing.T) map[gvk][]unstructured.Unstructured {
 	t.Helper()
-	overlayPath := filepath.Join(renderTestdataPath, "kuberay", "openshift")
-	overlayPath = copyRenderTestdata(t, overlayPath)
 
+	tmpRoot := t.TempDir()
+	dst := filepath.Join(tmpRoot, "kuberay")
+	if err := copyDirRecursive(vendoredManifestsPath, dst); err != nil {
+		t.Fatalf("copy vendored manifests: %v", err)
+	}
+
+	overlayPath := filepath.Join(dst, "openshift")
 	if err := applyParams(overlayPath, nil, map[string]string{"namespace": testTargetNS}); err != nil {
 		t.Fatalf("applyParams failed: %v", err)
 	}
@@ -70,6 +75,24 @@ func TestWebhookRender_MutatingWebhookConfiguration(t *testing.T) {
 	}
 
 	assertNoServingCertAnnotations(t, annotations)
+
+	webhooks, _, _ := unstructured.NestedSlice(mwc.Object, "webhooks")
+	if len(webhooks) == 0 {
+		t.Fatal("expected at least one webhook entry")
+	}
+	wh := webhooks[0].(map[string]any)
+	svcName, _, _ := unstructured.NestedString(wh, "clientConfig", "service", "name")
+	svcNS, _, _ := unstructured.NestedString(wh, "clientConfig", "service", "namespace")
+	svcPath, _, _ := unstructured.NestedString(wh, "clientConfig", "service", "path")
+	if svcName != "kuberay-webhook-service" {
+		t.Errorf("webhook clientConfig.service.name = %q, want %q", svcName, "kuberay-webhook-service")
+	}
+	if svcNS != testTargetNS {
+		t.Errorf("webhook clientConfig.service.namespace = %q, want %q", svcNS, testTargetNS)
+	}
+	if svcPath != "/mutate-ray-io-v1-raycluster" {
+		t.Errorf("webhook clientConfig.service.path = %q, want %q", svcPath, "/mutate-ray-io-v1-raycluster")
+	}
 }
 
 func TestWebhookRender_NoValidatingWebhookConfiguration(t *testing.T) {
@@ -135,6 +158,14 @@ func TestWebhookRender_WebhookService(t *testing.T) {
 	}
 
 	assertNoServingCertAnnotations(t, svc.GetAnnotations())
+
+	services := idx[gvk{"v1", "Service"}]
+	for _, s := range services {
+		if s.GetName() != "kuberay-webhook-service" && s.GetName() == "kuberay-operator" {
+			return
+		}
+	}
+	t.Error("expected a separate metrics Service (kuberay-operator) distinct from the webhook Service")
 }
 
 func TestWebhookRender_Deployment(t *testing.T) {
@@ -150,7 +181,7 @@ func TestWebhookRender_Deployment(t *testing.T) {
 	c := containers[0].(map[string]any)
 
 	assertEnvVar(t, c, "ENABLE_WEBHOOKS", "true")
-	assertContainerPort(t, c, 9443)
+	assertCertVolumeMount(t, c)
 	assertCertVolume(t, dep)
 }
 
@@ -185,18 +216,16 @@ func assertEnvVar(t *testing.T, container map[string]any, name, value string) {
 	t.Errorf("env var %s=%s not found", name, value)
 }
 
-func assertContainerPort(t *testing.T, container map[string]any, want int64) {
+func assertCertVolumeMount(t *testing.T, container map[string]any) {
 	t.Helper()
-	ports, _, _ := unstructured.NestedSlice(container, "ports")
-	for _, p := range ports {
-		pm := p.(map[string]any)
-		if port, ok := pm["containerPort"]; ok {
-			if portVal, ok := port.(int64); ok && portVal == want {
-				return
-			}
+	mounts, _, _ := unstructured.NestedSlice(container, "volumeMounts")
+	for _, m := range mounts {
+		mm := m.(map[string]any)
+		if mm["name"] == "cert" && mm["mountPath"] == "/tmp/k8s-webhook-server/serving-certs" {
+			return
 		}
 	}
-	t.Errorf("containerPort %d not found", want)
+	t.Error("volumeMount for cert at /tmp/k8s-webhook-server/serving-certs not found")
 }
 
 func assertCertVolume(t *testing.T, dep unstructured.Unstructured) {
@@ -250,24 +279,9 @@ func stringSliceEqual(a, b []string) bool {
 	return true
 }
 
-func copyRenderTestdata(t *testing.T, src string) string {
-	t.Helper()
-	dst := filepath.Join(t.TempDir(), "openshift")
+func copyDirRecursive(src, dst string) error {
 	if err := os.MkdirAll(dst, 0o755); err != nil {
-		t.Fatal(err)
+		return err
 	}
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		data, err := os.ReadFile(filepath.Join(src, e.Name()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dst, e.Name()), data, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return dst
+	return os.CopyFS(dst, os.DirFS(src))
 }

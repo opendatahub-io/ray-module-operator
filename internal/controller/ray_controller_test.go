@@ -43,7 +43,7 @@ const (
 	testNamespace      = "test-ray-ns"
 	timeout            = 60 * time.Second
 	interval           = 250 * time.Millisecond
-	webhookName        = "ray-kuberay-validating"
+	webhookName        = "kuberay-mutating-webhook-configuration"
 	lifecycleCRD       = "fakes.lifecycle.ray.test.io"
 	strayCMName        = "stray-part-of-ray"
 	inTreeImage        = "quay.io/opendatahub/kuberay-operator:in-tree"
@@ -174,11 +174,27 @@ var _ = Describe("Ray Controller", Ordered, func() {
 				}, cm)
 			}, timeout, interval).Should(Succeed())
 
-			By("verifying the cluster-scoped webhook is created")
-			Eventually(func() error {
-				wh := &admissionregistrationv1.ValidatingWebhookConfiguration{}
+			By("verifying the cluster-scoped webhook is created with cert-manager TLS")
+			Eventually(func(g Gomega) {
+				wh := &admissionregistrationv1.MutatingWebhookConfiguration{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: webhookName}, wh)).To(Succeed())
 
-				return k8sClient.Get(ctx, types.NamespacedName{Name: webhookName}, wh)
+				g.Expect(wh.Annotations).To(HaveKey("cert-manager.io/inject-ca-from"))
+				g.Expect(wh.Annotations["cert-manager.io/inject-ca-from"]).To(ContainSubstring("/serving-cert"))
+
+				g.Expect(wh.Webhooks).To(HaveLen(1))
+				hook := wh.Webhooks[0]
+				g.Expect(hook.ClientConfig.Service).NotTo(BeNil())
+				g.Expect(hook.ClientConfig.Service.Name).To(Equal("kuberay-webhook-service"))
+				g.Expect(*hook.ClientConfig.Service.Path).To(Equal("/mutate-ray-io-v1-raycluster"))
+
+				g.Expect(hook.Rules).To(HaveLen(1))
+				g.Expect(hook.Rules[0].APIGroups).To(ContainElement("ray.io"))
+				g.Expect(hook.Rules[0].Resources).To(ContainElement("rayclusters"))
+				g.Expect(hook.Rules[0].Operations).To(ContainElements(
+					admissionregistrationv1.Create,
+					admissionregistrationv1.Update,
+				))
 			}, timeout, interval).Should(Succeed())
 
 			By("verifying the notebook ClusterRole is created")
@@ -340,7 +356,7 @@ var _ = Describe("Ray Controller", Ordered, func() {
 				return isNotFound(&corev1.ConfigMap{}, configMapName, testNamespace)
 			}, timeout, interval).Should(BeTrue())
 			Eventually(func() bool {
-				return isNotFound(&admissionregistrationv1.ValidatingWebhookConfiguration{}, webhookName, "")
+				return isNotFound(&admissionregistrationv1.MutatingWebhookConfiguration{}, webhookName, "")
 			}, timeout, interval).Should(BeTrue())
 			Eventually(func() bool {
 				return isNotFound(&rbacv1.ClusterRole{}, notebookClusterRoleName, "")
@@ -404,7 +420,7 @@ var _ = Describe("Ray Controller", Ordered, func() {
 				}, dep)
 			}, timeout, interval).Should(Succeed())
 			Eventually(func() error {
-				wh := &admissionregistrationv1.ValidatingWebhookConfiguration{}
+				wh := &admissionregistrationv1.MutatingWebhookConfiguration{}
 
 				return k8sClient.Get(ctx, types.NamespacedName{Name: webhookName}, wh)
 			}, timeout, interval).Should(Succeed())
@@ -421,7 +437,7 @@ var _ = Describe("Ray Controller", Ordered, func() {
 				return isNotFound(&corev1.ConfigMap{}, configMapName, testNamespace)
 			}, timeout, interval).Should(BeTrue())
 			Eventually(func() bool {
-				return isNotFound(&admissionregistrationv1.ValidatingWebhookConfiguration{}, webhookName, "")
+				return isNotFound(&admissionregistrationv1.MutatingWebhookConfiguration{}, webhookName, "")
 			}, timeout, interval).Should(BeTrue())
 			Eventually(func() bool {
 				return isNotFound(&rbacv1.ClusterRole{}, notebookClusterRoleName, "")

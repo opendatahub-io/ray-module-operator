@@ -15,7 +15,7 @@ DST_MANIFESTS_DIR="${DST_MANIFESTS_DIR:-./opt/manifests}"
 #   4. "tag@sha"         - fetch tag, reset to specific commit
 
 declare -A ODH_COMPONENT_MANIFESTS=(
-    ["kuberay"]="opendatahub-io:kuberay:dev@ad425f7febc4039f2378747f2a0ea5dcf5a2263f:ray-operator/config"
+    ["kuberay"]="opendatahub-io:kuberay:dev@2ae7d5536dbac15287940606003151c2cd0819ad:ray-operator/config"
 )
 
 # FIXME: Bump to rhoai-3.6@<sha> once the GA branch is cut
