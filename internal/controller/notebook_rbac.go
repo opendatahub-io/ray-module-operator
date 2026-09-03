@@ -111,14 +111,12 @@ func notebookClusterRole() *rbacv1.ClusterRole {
 		Rules: []rbacv1.PolicyRule{
 			{
 				APIGroups: []string{"ray.io"},
-				Resources: []string{"rayjobs", "rayjobs/status"},
+				Resources: []string{"rayjobs"},
 				Verbs:     []string{"get", "list", "create", "patch", "delete"},
 			},
-			{
-				APIGroups: []string{"ray.io"},
-				Resources: []string{"rayclusters", "rayclusters/status"},
-				Verbs:     []string{"get", "list"},
-			},
+			{APIGroups: []string{"ray.io"}, Resources: []string{"rayjobs/status"}, Verbs: []string{"get", "list"}},
+			{APIGroups: []string{"ray.io"}, Resources: []string{"rayclusters"}, Verbs: []string{"get", "list"}},
+			{APIGroups: []string{"ray.io"}, Resources: []string{"rayclusters/status"}, Verbs: []string{"get", "list"}},
 			{
 				APIGroups: []string{""},
 				Resources: []string{"secrets"},

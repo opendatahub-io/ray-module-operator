@@ -1,0 +1,20 @@
+image:
+  repository: quay.io/opendatahub/odh-ray-module-operator
+  tag: latest
+  pullPolicy: IfNotPresent
+
+namespaceOverride: ray-module-operator-system
+
+replicaCount: 1
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 2Gi
+  requests:
+    cpu: 10m
+    memory: 256Mi
+
+metrics:
+  enabled: true
+  secure: true

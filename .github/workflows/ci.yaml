@@ -84,6 +84,38 @@ jobs:
             exit 1
           fi
 
+  helm:
+    name: Helm Chart
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Lint Helm chart
+        run: make helm-lint
+
+      - name: Render Helm chart
+        run: helm template ray charts/ray-module-operator > /tmp/ray-module-operator.yaml
+
+      - name: Verify Helm values are applied
+        run: |
+          helm template ray charts/ray-module-operator \
+            --set image.repository=example.invalid/ray-operator \
+            --set image.tag=ci \
+            --set replicaCount=2 \
+            --set namespaceOverride=ray-ci \
+            > /tmp/ray-module-operator-overrides.yaml
+          grep -q 'image: example.invalid/ray-operator:ci' /tmp/ray-module-operator-overrides.yaml
+          grep -q 'imagePullPolicy: IfNotPresent' /tmp/ray-module-operator-overrides.yaml
+          grep -q 'replicas: 2' /tmp/ray-module-operator-overrides.yaml
+          grep -q 'namespace: ray-ci' /tmp/ray-module-operator-overrides.yaml
+
   docker-build:
     name: Docker Build
     runs-on: ubuntu-24.04

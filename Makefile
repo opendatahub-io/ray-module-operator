@@ -63,7 +63,16 @@ verify-manifests: ## Verify embedded manifests match config/module source
 	@for f in $(EMBEDDED_MANIFESTS); do \
 		diff -u config/module/$$f internal/controller/manifests/$$f || \
 		(echo "ERROR: $$f out of sync. Run 'make sync-module-manifests' to fix." && exit 1); \
-	done
+	 done
+
+.PHONY: helm-chart-sync
+helm-chart-sync: manifests kustomize ## Sync the Kustomize installation bundle into the Helm chart.
+	@mkdir -p charts/ray-module-operator/files
+	@"$(KUSTOMIZE)" build config/default | yq 'select(.kind != "Namespace")' > charts/ray-module-operator/files/resources.yaml
+
+.PHONY: helm-lint
+helm-lint: helm-chart-sync ## Validate the Ray module-controller Helm chart.
+	helm lint charts/ray-module-operator
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
