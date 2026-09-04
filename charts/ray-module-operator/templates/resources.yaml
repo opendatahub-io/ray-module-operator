@@ -1,13 +1,7 @@
 {{- /*
-The synchronized bundle is rendered from config/default so Helm preserves the
-same names, generated RBAC relationships, patches, and resource set as the
-existing Kustomize installation. Values are applied by the source overlays.
+The synchronized bundle is rendered from config/openshift. Deployment and SCC
+are separate templates because they contain user-configurable values.
 */ -}}
 {{- $bundle := .Files.Get "files/resources.yaml" -}}
-{{- $bundle = replace "namespace: ray-module-operator-system" (printf "namespace: %s" (include "ray-module-operator.namespace" .)) $bundle -}}
-{{- $bundle = replace "replicas: 1" (printf "replicas: %v" .Values.replicaCount) $bundle -}}
-{{- $bundle = replace "image: quay.io/opendatahub/odh-ray-module-operator:latest" (printf "image: %s:%s\n          imagePullPolicy: %s" .Values.image.repository .Values.image.tag .Values.image.pullPolicy) $bundle -}}
-{{- $bundle = replace "imagePullPolicy: Always" (printf "imagePullPolicy: %s" .Values.image.pullPolicy) $bundle -}}
-{{- $resources := printf "        resources:\n%s        securityContext:" (toYaml .Values.resources | nindent 10) -}}
-{{- $bundle = regexReplaceAll "(?s)        resources:.*?        securityContext:" $resources $bundle -}}
+{{- $bundle = replace "namespace: opendatahub" (printf "namespace: %s" (include "ray-module-operator.namespace" .)) $bundle -}}
 {{ $bundle }}

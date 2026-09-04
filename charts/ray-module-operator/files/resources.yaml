@@ -3,6 +3,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
+  labels:
+    app.kubernetes.io/component: ray-module-operator
+    app.kubernetes.io/name: ray-module-operator
   name: rays.components.platform.opendatahub.io
 spec:
   group: components.platform.opendatahub.io
@@ -185,19 +188,21 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   labels:
+    app.kubernetes.io/component: ray-module-operator
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: ray-module-operator
   name: ray-module-operator-controller-manager
-  namespace: ray-module-operator-system
+  namespace: opendatahub
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   labels:
+    app.kubernetes.io/component: ray-module-operator
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: ray-module-operator
   name: ray-module-operator-leader-election-role
-  namespace: ray-module-operator-system
+  namespace: opendatahub
 rules:
   - apiGroups:
       - ""
@@ -235,10 +240,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   labels:
+    app.kubernetes.io/component: ray-module-operator
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: ray-module-operator
   name: ray-module-operator-manager-role
-  namespace: ray-module-operator-system
+  namespace: opendatahub
 rules:
   - apiGroups:
       - ""
@@ -299,6 +305,9 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
+  labels:
+    app.kubernetes.io/component: ray-module-operator
+    app.kubernetes.io/name: ray-module-operator
   name: ray-module-operator-manager-role
 rules:
   - apiGroups:
@@ -615,6 +624,9 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
+  labels:
+    app.kubernetes.io/component: ray-module-operator
+    app.kubernetes.io/name: ray-module-operator
   name: ray-module-operator-metrics-auth-role
 rules:
   - apiGroups:
@@ -633,6 +645,9 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
+  labels:
+    app.kubernetes.io/component: ray-module-operator
+    app.kubernetes.io/name: ray-module-operator
   name: ray-module-operator-metrics-reader
 rules:
   - nonResourceURLs:
@@ -644,6 +659,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   labels:
+    app.kubernetes.io/component: ray-module-operator
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: ray-module-operator
   name: ray-module-operator-ray-admin-role
@@ -671,6 +687,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   labels:
+    app.kubernetes.io/component: ray-module-operator
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: ray-module-operator
   name: ray-module-operator-ray-editor-role
@@ -698,6 +715,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   labels:
+    app.kubernetes.io/component: ray-module-operator
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: ray-module-operator
   name: ray-module-operator-ray-viewer-role
@@ -721,10 +739,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   labels:
+    app.kubernetes.io/component: ray-module-operator
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: ray-module-operator
   name: ray-module-operator-leader-election-rolebinding
-  namespace: ray-module-operator-system
+  namespace: opendatahub
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -732,16 +751,17 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: ray-module-operator-controller-manager
-    namespace: ray-module-operator-system
+    namespace: opendatahub
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   labels:
+    app.kubernetes.io/component: ray-module-operator
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: ray-module-operator
   name: ray-module-operator-manager-rolebinding
-  namespace: ray-module-operator-system
+  namespace: opendatahub
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -749,12 +769,13 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: ray-module-operator-controller-manager
-    namespace: ray-module-operator-system
+    namespace: opendatahub
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   labels:
+    app.kubernetes.io/component: ray-module-operator
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: ray-module-operator
   name: ray-module-operator-manager-rolebinding
@@ -765,11 +786,14 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: ray-module-operator-controller-manager
-    namespace: ray-module-operator-system
+    namespace: opendatahub
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
+  labels:
+    app.kubernetes.io/component: ray-module-operator
+    app.kubernetes.io/name: ray-module-operator
   name: ray-module-operator-metrics-auth-rolebinding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -778,17 +802,32 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: ray-module-operator-controller-manager
-    namespace: ray-module-operator-system
+    namespace: opendatahub
+---
+apiVersion: v1
+data:
+  namespace: opendatahub
+  odh-kube-rbac-proxy-image: quay.io/opendatahub/odh-kube-rbac-proxy:odh-stable
+  odh-kuberay-operator-controller-image: quay.io/opendatahub/kuberay-operator:latest
+  odh-ray-module-operator-image: quay.io/opendatahub/odh-ray-module-operator:latest
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/component: ray-module-operator
+    app.kubernetes.io/name: ray-module-operator
+  name: ray-module-operator-config-gm4dm9kfmt
+  namespace: opendatahub
 ---
 apiVersion: v1
 kind: Service
 metadata:
   labels:
+    app.kubernetes.io/component: ray-module-operator
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: ray-module-operator
     control-plane: controller-manager
   name: ray-module-operator-controller-manager-metrics-service
-  namespace: ray-module-operator-system
+  namespace: opendatahub
 spec:
   ports:
     - name: https
@@ -796,79 +835,6 @@ spec:
       protocol: TCP
       targetPort: 8443
   selector:
+    app.kubernetes.io/component: ray-module-operator
     app.kubernetes.io/name: ray-module-operator
     control-plane: controller-manager
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  labels:
-    app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: ray-module-operator
-    control-plane: controller-manager
-  name: ray-module-operator-controller-manager
-  namespace: ray-module-operator-system
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: ray-module-operator
-      control-plane: controller-manager
-  template:
-    metadata:
-      annotations:
-        kubectl.kubernetes.io/default-container: manager
-      labels:
-        app.kubernetes.io/name: ray-module-operator
-        control-plane: controller-manager
-    spec:
-      containers:
-        - args:
-            - --metrics-bind-address=:8443
-            - --leader-elect
-            - --health-probe-bind-address=:8081
-          command:
-            - /manager
-          image: quay.io/opendatahub/odh-ray-module-operator:latest
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 8081
-            initialDelaySeconds: 15
-            periodSeconds: 20
-          name: manager
-          ports:
-            - containerPort: 8081
-              name: health
-              protocol: TCP
-          readinessProbe:
-            httpGet:
-              path: /readyz
-              port: 8081
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          resources:
-            limits:
-              cpu: 500m
-              memory: 2Gi
-            requests:
-              cpu: 10m
-              memory: 256Mi
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
-            readOnlyRootFilesystem: true
-          volumeMounts:
-            - mountPath: /tmp
-              name: tmp
-      securityContext:
-        runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
-      serviceAccountName: ray-module-operator-controller-manager
-      terminationGracePeriodSeconds: 10
-      volumes:
-        - emptyDir: {}
-          name: tmp

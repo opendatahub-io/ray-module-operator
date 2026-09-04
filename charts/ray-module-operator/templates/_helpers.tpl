@@ -11,7 +11,7 @@
 {{- end }}
 
 {{- define "ray-module-operator.namespace" -}}
-{{- default "ray-module-operator-system" .Values.namespaceOverride }}
+{{- default "ray-module-operator-system" .Values.operatorNamespace }}
 {{- end }}
 
 {{- define "ray-module-operator.labels" -}}
