@@ -751,7 +751,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: ray-module-operator-controller-manager
-    namespace: opendatahub
+    namespace: __OPERATOR_NAMESPACE__
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -769,7 +769,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: ray-module-operator-controller-manager
-    namespace: opendatahub
+    namespace: __OPERATOR_NAMESPACE__
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -786,7 +786,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: ray-module-operator-controller-manager
-    namespace: opendatahub
+    namespace: __OPERATOR_NAMESPACE__
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -802,11 +802,11 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: ray-module-operator-controller-manager
-    namespace: opendatahub
+    namespace: __OPERATOR_NAMESPACE__
 ---
 apiVersion: v1
 data:
-  namespace: opendatahub
+  namespace: __APPLICATION_NAMESPACE__
   odh-kube-rbac-proxy-image: quay.io/opendatahub/odh-kube-rbac-proxy:odh-stable
   odh-kuberay-operator-controller-image: quay.io/opendatahub/kuberay-operator:latest
   odh-ray-module-operator-image: quay.io/opendatahub/odh-ray-module-operator:latest

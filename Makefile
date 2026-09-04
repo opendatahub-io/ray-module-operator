@@ -68,7 +68,7 @@ verify-manifests: ## Verify embedded manifests match config/module source
 .PHONY: helm-chart-sync
 helm-chart-sync: manifests kustomize yq ## Sync the Kustomize installation bundle into the Helm chart.
 	@mkdir -p charts/ray-module-operator/files
-	@"$(KUSTOMIZE)" build config/openshift | "$(YQ)" 'select(.kind != "Namespace" and .kind != "Deployment" and .kind != "SecurityContextConstraints") | with(select(.metadata.namespace != null); .metadata.namespace = "__OPERATOR_NAMESPACE__")' > charts/ray-module-operator/files/resources.yaml
+	@"$(KUSTOMIZE)" build config/openshift | "$(YQ)" 'select(.kind != "Namespace" and .kind != "Deployment" and .kind != "SecurityContextConstraints") | with(select(.metadata.namespace != null); .metadata.namespace = "__OPERATOR_NAMESPACE__") | with(select(.subjects != null); (.subjects[] | select(.namespace != null) | .namespace) = "__OPERATOR_NAMESPACE__") | with(select(.data.namespace == "opendatahub"); .data.namespace = "__APPLICATION_NAMESPACE__")' > charts/ray-module-operator/files/resources.yaml
 
 .PHONY: helm-lint
 helm-lint: helm-chart-sync ## Validate the Ray module-controller Helm chart.
@@ -77,7 +77,7 @@ helm-lint: helm-chart-sync ## Validate the Ray module-controller Helm chart.
 .PHONY: helm-chart-sync-check
 helm-chart-sync-check: kustomize yq ## Verify the committed Helm bundle matches config/openshift.
 	@tmp=$$(mktemp); trap 'rm -f "$$tmp"' EXIT; \
-	"$(KUSTOMIZE)" build config/openshift | "$(YQ)" 'select(.kind != "Namespace" and .kind != "Deployment" and .kind != "SecurityContextConstraints") | with(select(.metadata.namespace != null); .metadata.namespace = "__OPERATOR_NAMESPACE__")' > "$$tmp"; \
+	"$(KUSTOMIZE)" build config/openshift | "$(YQ)" 'select(.kind != "Namespace" and .kind != "Deployment" and .kind != "SecurityContextConstraints") | with(select(.metadata.namespace != null); .metadata.namespace = "__OPERATOR_NAMESPACE__") | with(select(.subjects != null); (.subjects[] | select(.namespace != null) | .namespace) = "__OPERATOR_NAMESPACE__") | with(select(.data.namespace == "opendatahub"); .data.namespace = "__APPLICATION_NAMESPACE__")' > "$$tmp"; \
 	diff -u charts/ray-module-operator/files/resources.yaml "$$tmp"
 
 .PHONY: generate

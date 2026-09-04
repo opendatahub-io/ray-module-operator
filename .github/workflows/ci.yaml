@@ -126,6 +126,11 @@ jobs:
           grep -q 'RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE' /tmp/ray-module-operator-overrides.yaml
           grep -q 'name: run-as-ray-user' /tmp/ray-module-operator-overrides.yaml
           grep -q 'system:serviceaccount:apps-ci:kuberay-operator' /tmp/ray-module-operator-overrides.yaml
+          grep -q 'namespace: ray-ci' /tmp/ray-module-operator-overrides.yaml
+          if grep -q 'namespace: opendatahub' /tmp/ray-module-operator-overrides.yaml; then
+            echo 'Found an unparameterized opendatahub namespace in the rendered chart'
+            exit 1
+          fi
 
   docker-build:
     name: Docker Build
