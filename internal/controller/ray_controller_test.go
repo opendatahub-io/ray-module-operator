@@ -203,7 +203,7 @@ var _ = Describe("Ray Controller", Ordered, func() {
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: notebookClusterRoleName}, cr)).To(Succeed())
 				g.Expect(cr.Labels[gc.DefaultPartOfLabelKey]).To(Equal(constants.ComponentName))
 				g.Expect(cr.OwnerReferences).To(BeEmpty())
-				g.Expect(cr.Rules).To(HaveLen(3))
+				g.Expect(cr.Rules).To(HaveLen(5))
 			}, timeout, interval).Should(Succeed())
 
 			By("verifying KubeRay is reported in status.releases")

@@ -84,6 +84,54 @@ jobs:
             exit 1
           fi
 
+  helm:
+    name: Helm Chart
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Lint Helm chart
+        run: make helm-lint
+
+      - name: Verify synchronized Helm bundle
+        run: make helm-chart-sync-check
+
+      - name: Render Helm chart
+        run: helm template ray charts/ray-module-operator > /tmp/ray-module-operator.yaml
+
+      - name: Verify Helm values are applied
+        run: |
+          helm template ray charts/ray-module-operator \
+            --set image.repository=example.invalid/ray-operator \
+            --set image.tag=ci \
+            --set replicaCount=2 \
+            --set operatorNamespace=ray-ci \
+            --set applicationsNamespace=apps-ci \
+            --set resources.limits.memory=1Gi \
+            > /tmp/ray-module-operator-overrides.yaml
+          grep -q 'image: example.invalid/ray-operator:ci' /tmp/ray-module-operator-overrides.yaml
+          grep -q 'imagePullPolicy: IfNotPresent' /tmp/ray-module-operator-overrides.yaml
+          grep -q 'replicas: 2' /tmp/ray-module-operator-overrides.yaml
+          grep -q 'namespace: ray-ci' /tmp/ray-module-operator-overrides.yaml
+          grep -q 'value: apps-ci' /tmp/ray-module-operator-overrides.yaml
+          grep -q 'memory: 1Gi' /tmp/ray-module-operator-overrides.yaml
+          grep -q 'RELATED_IMAGE_ODH_KUBERAY_OPERATOR_CONTROLLER_IMAGE' /tmp/ray-module-operator-overrides.yaml
+          grep -q 'RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE' /tmp/ray-module-operator-overrides.yaml
+          grep -q 'name: run-as-ray-user' /tmp/ray-module-operator-overrides.yaml
+          grep -q 'system:serviceaccount:apps-ci:kuberay-operator' /tmp/ray-module-operator-overrides.yaml
+          grep -q 'namespace: ray-ci' /tmp/ray-module-operator-overrides.yaml
+          if grep -q 'namespace: opendatahub' /tmp/ray-module-operator-overrides.yaml; then
+            echo 'Found an unparameterized opendatahub namespace in the rendered chart'
+            exit 1
+          fi
+
   docker-build:
     name: Docker Build
     runs-on: ubuntu-24.04

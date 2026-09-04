@@ -37,30 +37,38 @@ func TestNotebookClusterRole(t *testing.T) {
 	if cr.Labels[gc.DefaultPartOfLabelKey] != constants.ComponentName {
 		t.Fatalf("part-of label = %q, want %q", cr.Labels[gc.DefaultPartOfLabelKey], constants.ComponentName)
 	}
-	if len(cr.Rules) != 3 {
-		t.Fatalf("rules = %d, want 3", len(cr.Rules))
+	if len(cr.Rules) != 5 {
+		t.Fatalf("rules = %d, want 5", len(cr.Rules))
 	}
 
 	job := cr.Rules[0]
 	if got, want := job.APIGroups, []string{"ray.io"}; !equalStrings(got, want) {
 		t.Errorf("rayjobs apiGroups = %v, want %v", got, want)
 	}
-	if got, want := job.Resources, []string{"rayjobs", "rayjobs/status"}; !equalStrings(got, want) {
+	if got, want := job.Resources, []string{"rayjobs"}; !equalStrings(got, want) {
 		t.Errorf("rayjobs resources = %v, want %v", got, want)
 	}
 	if got, want := job.Verbs, []string{"get", "list", "create", "patch", "delete"}; !equalStrings(got, want) {
 		t.Errorf("rayjobs verbs = %v, want %v", got, want)
 	}
 
-	cluster := cr.Rules[1]
-	if got, want := cluster.Resources, []string{"rayclusters", "rayclusters/status"}; !equalStrings(got, want) {
+	jobStatus := cr.Rules[1]
+	if got, want := jobStatus.Resources, []string{"rayjobs/status"}; !equalStrings(got, want) {
+		t.Errorf("rayjobs status resources = %v, want %v", got, want)
+	}
+	cluster := cr.Rules[2]
+	if got, want := cluster.Resources, []string{"rayclusters"}; !equalStrings(got, want) {
 		t.Errorf("rayclusters resources = %v, want %v", got, want)
 	}
 	if got, want := cluster.Verbs, []string{"get", "list"}; !equalStrings(got, want) {
 		t.Errorf("rayclusters verbs = %v, want %v", got, want)
 	}
 
-	secrets := cr.Rules[2]
+	clusterStatus := cr.Rules[3]
+	if got, want := clusterStatus.Resources, []string{"rayclusters/status"}; !equalStrings(got, want) {
+		t.Errorf("rayclusters status resources = %v, want %v", got, want)
+	}
+	secrets := cr.Rules[4]
 	if got, want := secrets.APIGroups, []string{""}; !equalStrings(got, want) {
 		t.Errorf("secrets apiGroups = %v, want %v", got, want)
 	}

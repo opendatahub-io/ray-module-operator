@@ -272,6 +272,7 @@ rules:
   - rayservices/status
   verbs:
   - get
+  - list
   - patch
   - update
 - apiGroups:

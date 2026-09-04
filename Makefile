@@ -63,7 +63,22 @@ verify-manifests: ## Verify embedded manifests match config/module source
 	@for f in $(EMBEDDED_MANIFESTS); do \
 		diff -u config/module/$$f internal/controller/manifests/$$f || \
 		(echo "ERROR: $$f out of sync. Run 'make sync-module-manifests' to fix." && exit 1); \
-	done
+	 done
+
+.PHONY: helm-chart-sync
+helm-chart-sync: manifests kustomize yq ## Sync the Kustomize installation bundle into the Helm chart.
+	@mkdir -p charts/ray-module-operator/files
+	@"$(KUSTOMIZE)" build config/openshift | "$(YQ)" 'select(.kind != "Namespace" and .kind != "Deployment" and .kind != "SecurityContextConstraints") | with(select(.metadata.namespace != null); .metadata.namespace = "__OPERATOR_NAMESPACE__") | with(select(.subjects != null); (.subjects[] | select(.namespace != null) | .namespace) = "__OPERATOR_NAMESPACE__") | with(select(.data.namespace == "opendatahub"); .data.namespace = "__APPLICATION_NAMESPACE__")' > charts/ray-module-operator/files/resources.yaml
+
+.PHONY: helm-lint
+helm-lint: helm-chart-sync ## Validate the Ray module-controller Helm chart.
+	helm lint charts/ray-module-operator
+
+.PHONY: helm-chart-sync-check
+helm-chart-sync-check: kustomize yq ## Verify the committed Helm bundle matches config/openshift.
+	@tmp=$$(mktemp); trap 'rm -f "$$tmp"' EXIT; \
+	"$(KUSTOMIZE)" build config/openshift | "$(YQ)" 'select(.kind != "Namespace" and .kind != "Deployment" and .kind != "SecurityContextConstraints") | with(select(.metadata.namespace != null); .metadata.namespace = "__OPERATOR_NAMESPACE__") | with(select(.subjects != null); (.subjects[] | select(.namespace != null) | .namespace) = "__OPERATOR_NAMESPACE__") | with(select(.data.namespace == "opendatahub"); .data.namespace = "__APPLICATION_NAMESPACE__")' > "$$tmp"; \
+	diff -u charts/ray-module-operator/files/resources.yaml "$$tmp"
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
@@ -210,6 +225,8 @@ GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.8.1
+YQ ?= $(LOCALBIN)/yq
+YQ_VERSION ?= v4.44.3
 CONTROLLER_TOOLS_VERSION ?= v0.20.1
 
 #ENVTEST_VERSION is the version of controller-runtime release branch to fetch the envtest setup script (i.e. release-0.20)
@@ -227,6 +244,10 @@ GOLANGCI_LINT_VERSION ?= v2.11.4
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)
 	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
+
+yq: $(YQ) ## Download yq locally if necessary.
+$(YQ): $(LOCALBIN)
+	$(call go-install-tool,$(YQ),github.com/mikefarah/yq/v4,$(YQ_VERSION))
 
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
