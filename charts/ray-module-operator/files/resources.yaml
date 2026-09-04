@@ -192,7 +192,7 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: ray-module-operator
   name: ray-module-operator-controller-manager
-  namespace: opendatahub
+  namespace: __OPERATOR_NAMESPACE__
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -202,7 +202,7 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: ray-module-operator
   name: ray-module-operator-leader-election-role
-  namespace: opendatahub
+  namespace: __OPERATOR_NAMESPACE__
 rules:
   - apiGroups:
       - ""
@@ -244,7 +244,7 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: ray-module-operator
   name: ray-module-operator-manager-role
-  namespace: opendatahub
+  namespace: __OPERATOR_NAMESPACE__
 rules:
   - apiGroups:
       - ""
@@ -743,7 +743,7 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: ray-module-operator
   name: ray-module-operator-leader-election-rolebinding
-  namespace: opendatahub
+  namespace: __OPERATOR_NAMESPACE__
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -761,7 +761,7 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: ray-module-operator
   name: ray-module-operator-manager-rolebinding
-  namespace: opendatahub
+  namespace: __OPERATOR_NAMESPACE__
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -816,7 +816,7 @@ metadata:
     app.kubernetes.io/component: ray-module-operator
     app.kubernetes.io/name: ray-module-operator
   name: ray-module-operator-config-gm4dm9kfmt
-  namespace: opendatahub
+  namespace: __OPERATOR_NAMESPACE__
 ---
 apiVersion: v1
 kind: Service
@@ -827,7 +827,7 @@ metadata:
     app.kubernetes.io/name: ray-module-operator
     control-plane: controller-manager
   name: ray-module-operator-controller-manager-metrics-service
-  namespace: opendatahub
+  namespace: __OPERATOR_NAMESPACE__
 spec:
   ports:
     - name: https

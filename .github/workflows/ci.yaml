@@ -114,15 +114,18 @@ jobs:
             --set replicaCount=2 \
             --set operatorNamespace=ray-ci \
             --set applicationsNamespace=apps-ci \
+            --set resources.limits.memory=1Gi \
             > /tmp/ray-module-operator-overrides.yaml
           grep -q 'image: example.invalid/ray-operator:ci' /tmp/ray-module-operator-overrides.yaml
           grep -q 'imagePullPolicy: IfNotPresent' /tmp/ray-module-operator-overrides.yaml
           grep -q 'replicas: 2' /tmp/ray-module-operator-overrides.yaml
           grep -q 'namespace: ray-ci' /tmp/ray-module-operator-overrides.yaml
           grep -q 'value: apps-ci' /tmp/ray-module-operator-overrides.yaml
+          grep -q 'memory: 1Gi' /tmp/ray-module-operator-overrides.yaml
           grep -q 'RELATED_IMAGE_ODH_KUBERAY_OPERATOR_CONTROLLER_IMAGE' /tmp/ray-module-operator-overrides.yaml
           grep -q 'RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE' /tmp/ray-module-operator-overrides.yaml
           grep -q 'name: run-as-ray-user' /tmp/ray-module-operator-overrides.yaml
+          grep -q 'system:serviceaccount:apps-ci:kuberay-operator' /tmp/ray-module-operator-overrides.yaml
 
   docker-build:
     name: Docker Build

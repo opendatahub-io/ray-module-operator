@@ -15,4 +15,4 @@ runAsUser:
 seLinuxContext: {type: MustRunAs}
 seccompProfiles: [runtime/default]
 users:
-  - system:serviceaccount:{{ include "ray-module-operator.namespace" . }}:kuberay-operator
+  - system:serviceaccount:{{ .Values.applicationsNamespace }}:kuberay-operator

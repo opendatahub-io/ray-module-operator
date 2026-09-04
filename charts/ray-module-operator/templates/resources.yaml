@@ -3,5 +3,5 @@ The synchronized bundle is rendered from config/openshift. Deployment and SCC
 are separate templates because they contain user-configurable values.
 */ -}}
 {{- $bundle := .Files.Get "files/resources.yaml" -}}
-{{- $bundle = replace "namespace: opendatahub" (printf "namespace: %s" (include "ray-module-operator.namespace" .)) $bundle -}}
+{{- $bundle = replace "__OPERATOR_NAMESPACE__" (include "ray-module-operator.namespace" .) $bundle -}}
 {{ $bundle }}
