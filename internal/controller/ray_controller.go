@@ -90,6 +90,7 @@ import (
 // WithFinalizer cleans owned operands on Ray CR deletion (webhooks, SCC); CRDs stay.
 func SetupWithManager(ctx context.Context, mgr ctrl.Manager, manifestsBasePath string) error {
 	nsFn := namespaceFn
+	mapper := mgr.GetRESTMapper()
 
 	_, err := reconciler.ReconcilerFor(mgr, &componentsv1alpha1.Ray{}, builder.WithPredicates(predicate.Or(
 		fwpredicates.DefaultPredicate,
@@ -120,6 +121,7 @@ func SetupWithManager(ctx context.Context, mgr ctrl.Manager, manifestsBasePath s
 		WithAction(manifestInitAction()).
 		WithAction(applyImageParamsAction(manifestsBasePath)).
 		WithAction(RenderKustomize(manifestsBasePath, nsFn)).
+		WithAction(filterPlatformResources(mapper)).
 		WithAction(notebookClusterRoleAction()).
 		WithAction(deploy.NewAction(
 			deploy.WithFieldOwner(constants.FieldOwner),
