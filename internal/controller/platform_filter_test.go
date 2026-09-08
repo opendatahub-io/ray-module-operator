@@ -38,9 +38,9 @@ func (m *stubMapper) RESTMapping(gk schema.GroupKind, _ ...string) (*meta.RESTMa
 	return nil, &meta.NoKindMatchError{GroupKind: gk}
 }
 
-func makeResource(group, version, kind, name string) unstructured.Unstructured {
+func makeResource(group, kind, name string) unstructured.Unstructured {
 	u := unstructured.Unstructured{}
-	u.SetGroupVersionKind(schema.GroupVersionKind{Group: group, Version: version, Kind: kind})
+	u.SetGroupVersionKind(schema.GroupVersionKind{Group: group, Version: "v1", Kind: kind})
 	u.SetName(name)
 	return u
 }
@@ -51,9 +51,9 @@ func TestFilterPlatformResources_NoSCCAPI(t *testing.T) {
 
 	rr := &types.ReconciliationRequest{
 		Resources: []unstructured.Unstructured{
-			makeResource("apps", "v1", "Deployment", "kuberay-operator"),
-			makeResource("security.openshift.io", "v1", "SecurityContextConstraints", "run-as-ray-user"),
-			makeResource("", "v1", "ConfigMap", "ray-config"),
+			makeResource("apps", "Deployment", "kuberay-operator"),
+			makeResource("security.openshift.io", "SecurityContextConstraints", "run-as-ray-user"),
+			makeResource("", "ConfigMap", "ray-config"),
 		},
 	}
 
@@ -79,9 +79,9 @@ func TestFilterPlatformResources_WithSCCAPI(t *testing.T) {
 
 	rr := &types.ReconciliationRequest{
 		Resources: []unstructured.Unstructured{
-			makeResource("apps", "v1", "Deployment", "kuberay-operator"),
-			makeResource("security.openshift.io", "v1", "SecurityContextConstraints", "run-as-ray-user"),
-			makeResource("", "v1", "ConfigMap", "ray-config"),
+			makeResource("apps", "Deployment", "kuberay-operator"),
+			makeResource("security.openshift.io", "SecurityContextConstraints", "run-as-ray-user"),
+			makeResource("", "ConfigMap", "ray-config"),
 		},
 	}
 
