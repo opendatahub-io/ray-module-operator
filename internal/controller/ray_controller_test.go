@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -365,21 +366,21 @@ var _ = Describe("Ray Controller", Ordered, func() {
 			Expect(k8sClient.Update(ctx, ray)).To(Succeed())
 
 			By("verifying namespaced and cluster-scoped operands are deleted")
-			Eventually(func() bool {
-				return isNotFound(&appsv1.Deployment{}, deploymentName, testNamespace)
-			}, timeout, interval).Should(BeTrue())
-			Eventually(func() bool {
-				return isNotFound(&corev1.ConfigMap{}, configMapName, testNamespace)
-			}, timeout, interval).Should(BeTrue())
-			Eventually(func() bool {
-				return isNotFound(&admissionregistrationv1.MutatingWebhookConfiguration{}, webhookName, "")
-			}, timeout, interval).Should(BeTrue())
-			Eventually(func() bool {
-				return isNotFound(&rbacv1.ClusterRole{}, notebookClusterRoleName, "")
-			}, timeout, interval).Should(BeTrue())
-			Eventually(func() bool {
-				return isNotFound(&corev1.ConfigMap{}, strayCMName, testNamespace)
-			}, timeout, interval).Should(BeTrue())
+			Eventually(func() error {
+				return deletionStatus(&appsv1.Deployment{}, deploymentName, testNamespace)
+			}, timeout, interval).Should(Succeed())
+			Eventually(func() error {
+				return deletionStatus(&corev1.ConfigMap{}, configMapName, testNamespace)
+			}, timeout, interval).Should(Succeed())
+			Eventually(func() error {
+				return deletionStatus(&admissionregistrationv1.MutatingWebhookConfiguration{}, webhookName, "")
+			}, timeout, interval).Should(Succeed())
+			Eventually(func() error {
+				return deletionStatus(&rbacv1.ClusterRole{}, notebookClusterRoleName, "")
+			}, timeout, interval).Should(Succeed())
+			Eventually(func() error {
+				return deletionStatus(&corev1.ConfigMap{}, strayCMName, testNamespace)
+			}, timeout, interval).Should(Succeed())
 
 			By("verifying the labeled CRD is kept")
 			crd := &apiextensionsv1.CustomResourceDefinition{}
@@ -590,4 +591,19 @@ func isNotFound(obj client.Object, name, namespace string) bool {
 	err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, obj)
 
 	return errors.IsNotFound(err)
+}
+
+func deletionStatus(obj client.Object, name, namespace string) error {
+	err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, obj)
+	if errors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if deletionTimestamp := obj.GetDeletionTimestamp(); deletionTimestamp != nil {
+		return fmt.Errorf("%T %s/%s is still terminating since %s", obj, namespace, name, deletionTimestamp.Format(time.RFC3339))
+	}
+
+	return fmt.Errorf("%T %s/%s still exists without a deletion timestamp", obj, namespace, name)
 }
