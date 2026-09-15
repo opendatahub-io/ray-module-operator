@@ -1,0 +1,50 @@
+ARG BUILDPLATFORM
+ARG TARGETPLATFORM
+
+################################################################################
+FROM --platform=$BUILDPLATFORM registry.access.redhat.com/ubi9/toolbox:9.6@sha256:668ae64b30c95862377fc2414e48714f1aceff9d23a1d8c4141e3e83a4d4fc2a AS manifests
+ARG ODH_PLATFORM_TYPE=rhoai
+ENV ODH_PLATFORM_TYPE=${ODH_PLATFORM_TYPE}
+USER root
+WORKDIR /
+COPY hack/scripts/get-manifests.sh hack/scripts/get-manifests.sh
+RUN mkdir -p opt/manifests && ./hack/scripts/get-manifests.sh
+
+################################################################################
+FROM --platform=$BUILDPLATFORM registry.access.redhat.com/ubi9/go-toolset@sha256:685ccca486cc2c82b0818d835abecb1aed7a396e76ba416cfc47c28067f5d365 AS builder
+ARG CGO_ENABLED=1
+ARG GOEXPERIMENT=strictfipsruntime
+ARG TARGETOS
+ARG TARGETARCH
+USER root
+WORKDIR /workspace
+COPY go.mod go.sum ./
+
+RUN go mod download
+
+COPY cmd/main.go cmd/main.go
+COPY api/ api/
+COPY internal/ internal/
+
+RUN CGO_ENABLED=${CGO_ENABLED} GOEXPERIMENT=${GOEXPERIMENT} GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} go build -a -trimpath -ldflags="-s -w" -o manager cmd/main.go
+
+FROM --platform=$TARGETPLATFORM registry.redhat.io/ubi9/ubi-minimal-pqc@sha256:a3f7ca6346ee5ca1867d1dcc79b011c5c711bf7a3e43c7cece3323d6d1ef5ac0
+WORKDIR /
+COPY --from=builder /workspace/manager .
+COPY --from=manifests /opt/manifests /opt/manifests
+
+RUN chgrp -R 0 /manager /opt/manifests && \
+    chmod -R g=u /manager /opt/manifests
+
+USER 65532:65532
+
+ENTRYPOINT ["/manager"]
+
+LABEL com.redhat.component="odh-ray-module-operator-rhel9" \
+      name="rhoai/odh-ray-module-operator-rhel9" \
+      summary="OpenDataHub Ray Module Operator" \
+      description="Operator for managing Ray distributed workloads on OpenShift" \
+      maintainer="['managed-open-data-hub@redhat.com']" \
+      io.k8s.display-name="odh-ray-module-operator" \
+      io.k8s.description="Operator for managing Ray module deployments on OpenShift" \
+      com.redhat.license_terms="https://www.redhat.com/licenses/Red_Hat_Standard_EULA_20191108.pdf"
