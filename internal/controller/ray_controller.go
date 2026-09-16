@@ -194,13 +194,13 @@ func reconcileGCAction(nsFn actions.Getter[string]) actions.Fn {
 	return func(ctx context.Context, rr *types.ReconciliationRequest) error {
 		removed, _ := rr.Extensions[constants.ExtKeyRemoved].(bool)
 		if removed {
-			if err := removedGC(ctx, rr); err != nil {
+			// Delete known operands directly first. Framework GC relies on
+			// discovery and label-selector listing, which can lag behind the
+			// management-state update in envtest and leave an operand behind.
+			if err := deleteOwnedOperands(ctx, rr); err != nil {
 				return err
 			}
-			// Label-selector GC misses operands whose part-of label was
-			// dropped after Ready=True SSA. Controller ownerRef still
-			// points at the Ray CR.
-			return deleteOwnedOperands(ctx, rr)
+			return removedGC(ctx, rr)
 		}
 
 		return managedGC(ctx, rr)
