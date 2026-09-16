@@ -49,6 +49,19 @@ var _ = Describe("Platform Contract Conformance", Ordered, func() {
 	ns := applicationsNamespace()
 
 	BeforeAll(func() {
+		By("creating the Ray module CR explicitly")
+		cmd := exec.Command("kubectl", "apply", "-f", "-")
+		cmd.Stdin = strings.NewReader(`
+apiVersion: components.platform.opendatahub.io/v1alpha1
+kind: Ray
+metadata:
+  name: default-ray
+spec:
+  managementState: Managed
+`)
+		_, err := utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "failed to create Ray CR")
+
 		By("waiting for the Ray module CR to be Ready")
 		Eventually(func(g Gomega) {
 			out, err := kubectlGetJsonpath("get", "ray", "default-ray",
@@ -56,6 +69,12 @@ var _ = Describe("Platform Contract Conformance", Ordered, func() {
 			g.Expect(err).NotTo(HaveOccurred(), "failed to get Ray CR")
 			g.Expect(strings.TrimSpace(out)).To(Equal("True"), "Ray CR not Ready")
 		}, 5*time.Minute, 5*time.Second).Should(Succeed())
+	})
+
+	AfterAll(func() {
+		By("deleting the Ray module CR")
+		cmd := exec.Command("kubectl", "delete", "ray", "default-ray", "--timeout=120s")
+		_, _ = utils.Run(cmd)
 	})
 
 	Context("Singleton Enforcement", func() {
