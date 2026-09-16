@@ -807,15 +807,15 @@ subjects:
 apiVersion: v1
 data:
   namespace: __APPLICATION_NAMESPACE__
-  odh-kube-rbac-proxy-image: quay.io/opendatahub/odh-kube-rbac-proxy:odh-stable
-  odh-kuberay-operator-controller-image: quay.io/opendatahub/kuberay-operator:latest
-  odh-ray-module-operator-image: quay.io/opendatahub/odh-ray-module-operator:latest
+  odh-kube-rbac-proxy-image: __KUBE_RBAC_PROXY_IMAGE__
+  odh-kuberay-operator-controller-image: __KUBERAY_OPERATOR_IMAGE__
+  odh-ray-module-operator-image: __OPERATOR_IMAGE__
 kind: ConfigMap
 metadata:
   labels:
     app.kubernetes.io/component: ray-module-operator
     app.kubernetes.io/name: ray-module-operator
-  name: ray-module-operator-config-gm4dm9kfmt
+  name: ray-module-operator-config-67g9t7kg4t
   namespace: __OPERATOR_NAMESPACE__
 ---
 apiVersion: v1

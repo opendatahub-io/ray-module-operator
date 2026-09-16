@@ -38,6 +38,12 @@ var (
 	shouldCleanupCertManager = false
 )
 
+const (
+	installMethodEnv       = "E2E_INSTALL_METHOD"
+	installMethodHelm      = "helm"
+	installMethodKustomize = "kustomize"
+)
+
 func ensureNamespace(name string) error {
 	cmd := exec.Command("kubectl", "get", "namespace", name)
 	if _, err := utils.Run(cmd); err == nil {
@@ -50,7 +56,8 @@ func ensureNamespace(name string) error {
 }
 
 // TestE2E runs the e2e test suite to validate the solution in an isolated environment.
-// The default setup requires Kind and CertManager.
+// The default setup installs the module operator with Helm. Set
+// E2E_INSTALL_METHOD=kustomize to exercise the Kustomize installation path.
 //
 // To enable kubectl kuberc (use custom kubectl configurations), set: KUBECTL_KUBERC=true
 // By default, kuberc is disabled to ensure consistent test behavior across different environments.
@@ -76,28 +83,63 @@ func setupModuleOperator() {
 	ExpectWithOffset(1, ensureNamespace(applicationsNamespace())).NotTo(HaveOccurred(),
 		"Failed to ensure applications namespace exists")
 
-	By("installing the standalone module operator with Helm")
-	cmd = exec.Command("helm", "upgrade", "--install", "ray-module-operator",
-		"./charts/ray-module-operator",
-		"--namespace", namespace,
-		"--set", "image.repository=example.com/ray-module-operator",
-		"--set", "image.tag=v0.0.1",
-		"--set", fmt.Sprintf("applicationsNamespace=%s", applicationsNamespace()),
-		"--set", "relatedImages.kuberayOperator=quay.io/opendatahub/kuberay-operator:v1.6.2",
-		"--set", "scc.enabled=false",
-	)
-	_, err = utils.Run(cmd)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install the module operator with Helm")
+	switch moduleOperatorInstallMethod() {
+	case installMethodHelm:
+		By("installing the standalone module operator with Helm")
+		cmd = exec.Command("helm", "upgrade", "--install", "ray-module-operator",
+			"./charts/ray-module-operator",
+			"--namespace", namespace,
+			"--set", "image.repository=example.com/ray-module-operator",
+			"--set", "image.tag=v0.0.1",
+			"--set", fmt.Sprintf("applicationsNamespace=%s", applicationsNamespace()),
+			"--set", "relatedImages.kuberayOperator=quay.io/opendatahub/kuberay-operator:v1.6.2",
+			"--set", "scc.enabled=false",
+		)
+		_, err = utils.Run(cmd)
+		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install the module operator with Helm")
+	case installMethodKustomize:
+		By("installing CRDs with Kustomize")
+		cmd = exec.Command("make", "install")
+		_, err = utils.Run(cmd)
+		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install CRDs with Kustomize")
+
+		By("deploying the standalone module operator with Kustomize")
+		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", managerImage))
+		_, err = utils.Run(cmd)
+		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to deploy the module operator with Kustomize")
+	default:
+		Fail(fmt.Sprintf("unsupported %s value %q", installMethodEnv, moduleOperatorInstallMethod()))
+	}
 }
 
 func teardownModuleOperator() {
-	By("uninstalling the standalone module operator")
-	cmd := exec.Command("helm", "uninstall", "ray-module-operator", "--namespace", namespace)
-	_, _ = utils.Run(cmd)
+	var cmd *exec.Cmd
+	switch moduleOperatorInstallMethod() {
+	case installMethodHelm:
+		By("uninstalling the standalone module operator with Helm")
+		cmd = exec.Command("helm", "uninstall", "ray-module-operator", "--namespace", namespace)
+		_, _ = utils.Run(cmd)
+	case installMethodKustomize:
+		By("undeploying the standalone module operator with Kustomize")
+		cmd = exec.Command("make", "undeploy", "ignore-not-found=true")
+		_, _ = utils.Run(cmd)
+
+		By("uninstalling CRDs with Kustomize")
+		cmd = exec.Command("make", "uninstall", "ignore-not-found=true")
+		_, _ = utils.Run(cmd)
+	}
 
 	By("removing manager namespace")
 	cmd = exec.Command("kubectl", "delete", "ns", namespace)
 	_, _ = utils.Run(cmd)
+}
+
+func moduleOperatorInstallMethod() string {
+	if method := os.Getenv(installMethodEnv); method != "" {
+		return method
+	}
+
+	return installMethodHelm
 }
 
 var _ = BeforeSuite(func() {
