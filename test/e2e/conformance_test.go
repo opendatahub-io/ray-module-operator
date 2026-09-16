@@ -51,14 +51,15 @@ var _ = Describe("Platform Contract Conformance", Ordered, func() {
 	BeforeAll(func() {
 		By("creating the Ray module CR explicitly")
 		cmd := exec.Command("kubectl", "apply", "-f", "-")
-		cmd.Stdin = strings.NewReader(`
+		cmd.Stdin = strings.NewReader(fmt.Sprintf(`
 apiVersion: components.platform.opendatahub.io/v1alpha1
 kind: Ray
 metadata:
   name: default-ray
 spec:
   managementState: Managed
-`)
+  applicationsNamespace: %s
+`, ns))
 		_, err := utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "failed to create Ray CR")
 
