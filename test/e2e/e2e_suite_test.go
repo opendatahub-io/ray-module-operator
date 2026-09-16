@@ -83,6 +83,7 @@ func setupModuleOperator() {
 		"--set", "image.repository=example.com/ray-module-operator",
 		"--set", "image.tag=v0.0.1",
 		"--set", fmt.Sprintf("applicationsNamespace=%s", applicationsNamespace()),
+		"--set", "relatedImages.kuberayOperator=quay.io/opendatahub/kuberay-operator:v1.6.2",
 		"--set", "scc.enabled=false",
 	)
 	_, err = utils.Run(cmd)
