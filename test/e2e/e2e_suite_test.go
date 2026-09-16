@@ -38,6 +38,17 @@ var (
 	shouldCleanupCertManager = false
 )
 
+func ensureNamespace(name string) error {
+	cmd := exec.Command("kubectl", "get", "namespace", name)
+	if _, err := utils.Run(cmd); err == nil {
+		return nil
+	}
+
+	cmd = exec.Command("kubectl", "create", "namespace", name)
+	_, err := utils.Run(cmd)
+	return err
+}
+
 // TestE2E runs the e2e test suite to validate the solution in an isolated environment.
 // The default setup requires Kind and CertManager.
 //
@@ -48,6 +59,44 @@ func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
 	_, _ = fmt.Fprintf(GinkgoWriter, "Starting ray-module-operator e2e test suite\n")
 	RunSpecs(t, "e2e suite")
+}
+
+func setupModuleOperator() {
+	By("ensuring manager namespace exists")
+	ExpectWithOffset(1, ensureNamespace(namespace)).NotTo(HaveOccurred(),
+		"Failed to ensure manager namespace exists")
+
+	By("labeling the namespace to enforce the restricted security policy")
+	cmd := exec.Command("kubectl", "label", "--overwrite", "ns", namespace,
+		"pod-security.kubernetes.io/enforce=restricted")
+	_, err := utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to label namespace with restricted policy")
+
+	By("ensuring applications namespace exists")
+	ExpectWithOffset(1, ensureNamespace(applicationsNamespace())).NotTo(HaveOccurred(),
+		"Failed to ensure applications namespace exists")
+
+	By("installing the standalone module operator with Helm")
+	cmd = exec.Command("helm", "upgrade", "--install", "ray-module-operator",
+		"./charts/ray-module-operator",
+		"--namespace", namespace,
+		"--set", "image.repository=example.com/ray-module-operator",
+		"--set", "image.tag=v0.0.1",
+		"--set", fmt.Sprintf("applicationsNamespace=%s", applicationsNamespace()),
+		"--set", "scc.enabled=false",
+	)
+	_, err = utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to install the module operator with Helm")
+}
+
+func teardownModuleOperator() {
+	By("uninstalling the standalone module operator")
+	cmd := exec.Command("helm", "uninstall", "ray-module-operator", "--namespace", namespace)
+	_, _ = utils.Run(cmd)
+
+	By("removing manager namespace")
+	cmd = exec.Command("kubectl", "delete", "ns", namespace)
+	_, _ = utils.Run(cmd)
 }
 
 var _ = BeforeSuite(func() {
@@ -64,9 +113,11 @@ var _ = BeforeSuite(func() {
 
 	configureKubectlKubeRC()
 	setupCertManager()
+	setupModuleOperator()
 })
 
 var _ = AfterSuite(func() {
+	teardownModuleOperator()
 	teardownCertManager()
 })
 
