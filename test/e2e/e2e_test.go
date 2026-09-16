@@ -44,6 +44,17 @@ const metricsServiceName = "ray-module-operator-controller-manager-metrics-servi
 // metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
 const metricsRoleBindingName = "ray-module-operator-metrics-binding"
 
+func ensureNamespace(name string) error {
+	cmd := exec.Command("kubectl", "get", "namespace", name)
+	if _, err := utils.Run(cmd); err == nil {
+		return nil
+	}
+
+	cmd = exec.Command("kubectl", "create", "namespace", name)
+	_, err := utils.Run(cmd)
+	return err
+}
+
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
 
@@ -62,6 +73,10 @@ var _ = Describe("Manager", Ordered, func() {
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to label namespace with restricted policy")
 
+		By("ensuring applications namespace exists")
+		err = ensureNamespace(applicationsNamespace())
+		Expect(err).NotTo(HaveOccurred(), "Failed to ensure applications namespace exists")
+
 		By("installing the standalone module operator with Helm")
 		cmd = exec.Command("helm", "upgrade", "--install", "ray-module-operator",
 			"./charts/ray-module-operator",
@@ -69,6 +84,7 @@ var _ = Describe("Manager", Ordered, func() {
 			"--set", "image.repository=example.com/ray-module-operator",
 			"--set", "image.tag=v0.0.1",
 			"--set", fmt.Sprintf("applicationsNamespace=%s", applicationsNamespace()),
+			"--set", "scc.enabled=false",
 		)
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to install the module operator with Helm")

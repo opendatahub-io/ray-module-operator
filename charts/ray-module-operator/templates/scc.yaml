@@ -1,3 +1,4 @@
+{{- if .Values.scc.enabled }}
 apiVersion: security.openshift.io/v1
 kind: SecurityContextConstraints
 metadata:
@@ -16,3 +17,4 @@ seLinuxContext: {type: MustRunAs}
 seccompProfiles: [runtime/default]
 users:
   - system:serviceaccount:{{ .Values.applicationsNamespace }}:kuberay-operator
+{{- end }}
