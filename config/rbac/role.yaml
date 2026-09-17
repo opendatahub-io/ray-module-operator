@@ -130,6 +130,14 @@ rules:
 - apiGroups:
   - components.platform.opendatahub.io
   resources:
+  - codeflares
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - components.platform.opendatahub.io
+  resources:
   - rays
   verbs:
   - create

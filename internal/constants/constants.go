@@ -30,6 +30,9 @@ const (
 
 	ExtKeyRemoved = "ray.removed"
 
+	CodeFlarePresentMessage = `Failed upgrade: CodeFlare component is present in the cluster. It must be uninstalled to proceed with Ray component upgrade.
+To uninstall it, you should delete all RayClusters resources from the cluster, delete the CodeFlare component resource and recreate the RayClusters.`
+
 	// FinalizerName is the platform-contract finalizer. It keeps the Ray CR
 	// alive until owned operands (including cluster-scoped webhooks/SCC) are
 	// cleaned up. CRDs are not removed.

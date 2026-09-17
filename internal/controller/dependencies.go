@@ -22,6 +22,7 @@ import (
 
 	"github.com/opendatahub-io/odh-platform-utilities/framework/cluster"
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/actions"
+	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/actions/sanitycheck"
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/types"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -29,9 +30,33 @@ import (
 	"github.com/opendatahub-io/ray-module-operator/internal/constants"
 )
 
-var certManagerGVKs = []schema.GroupVersionKind{
-	{Group: "cert-manager.io", Version: "v1", Kind: "Issuer"},
-	{Group: "cert-manager.io", Version: "v1", Kind: "Certificate"},
+var (
+	codeFlareGVK = schema.GroupVersionKind{
+		Group:   "components.platform.opendatahub.io",
+		Version: "v1alpha1",
+		Kind:    "CodeFlare",
+	}
+
+	certManagerGVKs = []schema.GroupVersionKind{
+		{Group: "cert-manager.io", Version: "v1", Kind: "Issuer"},
+		{Group: "cert-manager.io", Version: "v1", Kind: "Certificate"},
+	}
+)
+
+func codeFlareSanityCheckAction() actions.Fn {
+	check := sanitycheck.NewAction(
+		sanitycheck.WithUnwantedResource(codeFlareGVK, constants.CodeFlarePresentMessage),
+	)
+
+	return func(ctx context.Context, rr *types.ReconciliationRequest) error {
+		if rr.Extensions != nil {
+			if removed, _ := rr.Extensions[constants.ExtKeyRemoved].(bool); removed {
+				return nil
+			}
+		}
+
+		return check(ctx, rr)
+	}
 }
 
 func certManagerRequirementAction() actions.Fn {

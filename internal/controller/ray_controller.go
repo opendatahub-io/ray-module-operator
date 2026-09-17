@@ -26,6 +26,7 @@ import (
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/actions/gc"
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/actions/status/deployments"
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/conditions"
+	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/handlers"
 	fwpredicates "github.com/opendatahub-io/odh-platform-utilities/framework/controller/predicates"
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/reconciler"
 	"github.com/opendatahub-io/odh-platform-utilities/framework/controller/types"
@@ -48,6 +49,7 @@ import (
 // +kubebuilder:rbac:groups=components.platform.opendatahub.io,resources=rays,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=components.platform.opendatahub.io,resources=rays/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=components.platform.opendatahub.io,resources=rays/finalizers,verbs=update
+// +kubebuilder:rbac:groups=components.platform.opendatahub.io,resources=codeflares,verbs=get;list;watch
 
 // RBAC for operand resources deployed by the reconciler.
 //
@@ -106,6 +108,11 @@ func SetupWithManager(ctx context.Context, mgr ctrl.Manager, manifestsBasePath s
 			constants.ConditionDeploymentsAvailable,
 		).
 		WithDynamicOwnership().
+		WatchesGVK(
+			codeFlareGVK,
+			reconciler.WithEventHandler(handlers.ToNamed(constants.InstanceName)),
+			reconciler.Dynamic(reconciler.CrdExists(codeFlareGVK)),
+		).
 		Watches(
 			&corev1.ConfigMap{},
 			reconciler.WithEventMapper(platformConfigMapper(mgr.GetClient())),
@@ -118,6 +125,7 @@ func SetupWithManager(ctx context.Context, mgr ctrl.Manager, manifestsBasePath s
 			reconciler.WithPreApplyFailedReason("ApplicationsNamespaceNotProjected"),
 		).
 		WithAction(managementStateAction()).
+		WithAction(codeFlareSanityCheckAction()).
 		WithAction(releasesAction(manifestsBasePath)).
 		WithAction(manifestInitAction()).
 		WithAction(applyImageParamsAction(manifestsBasePath)).
