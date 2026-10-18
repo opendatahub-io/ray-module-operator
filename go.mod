@@ -6,7 +6,7 @@ require (
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
-	github.com/opendatahub-io/odh-platform-utilities v0.4.0
+	github.com/opendatahub-io/odh-platform-utilities v0.5.0
 	github.com/opendatahub-io/odh-platform-utilities/framework v0.2.0
 	github.com/openshift/api v0.0.0-20261002115817-f8795cdde518
 	github.com/openshift/controller-runtime-common v0.0.0-20261005093240-b39eb7218441
