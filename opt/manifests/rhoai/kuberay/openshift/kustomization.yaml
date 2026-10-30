@@ -37,6 +37,7 @@ vars:
 resources:
 - ray_operator_scc.yaml
 - ../default
+- ../network-policy
 - webhook.yaml
 - certmanager.yaml
 - rbac/tls
@@ -73,7 +74,7 @@ patches:
     version: v1
     kind: Deployment
     name: kuberay-operator
-- path: tls-service-patch.yaml
+- path: tls-service-json-patch.yaml
   target:
     version: v1
     kind: Service

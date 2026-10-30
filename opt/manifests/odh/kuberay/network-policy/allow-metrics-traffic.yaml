@@ -1,0 +1,45 @@
+# Least-privilege ingress for the kuberay-operator controller pod (RHOAIENG-96339).
+# Operand NetworkPolicies are reconciled separately by the KubeRay NetworkPolicy controller.
+#
+# Health probes bind to :8082 in this distribution (see apis/config DefaultProbeAddr and
+# openshift/tls-metrics-patch.yaml), not the :8081 default used by many other operators.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kuberay-operator-allow-metrics-traffic
+  labels:
+    app.kubernetes.io/name: kuberay
+    app.kubernetes.io/component: kuberay-operator
+    app.kubernetes.io/part-of: ray
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kuberay
+      app.kubernetes.io/component: kuberay-operator
+  policyTypes:
+    - Ingress
+  ingress:
+    # HTTPS metrics (kube-rbac-proxy / secure metrics).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-monitoring
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-user-workload-monitoring
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: redhat-ods-monitoring
+      ports:
+        - protocol: TCP
+          port: 8443
+    # Liveness/readiness on the controller-runtime health endpoint.
+    # Kubelet/node sources cannot be matched with namespace/pod selectors; restrict by port only.
+    - ports:
+        - protocol: TCP
+          port: 8082
+    # Admission webhooks (ENABLE_WEBHOOKS=true on OpenShift). API server peers are not
+    # expressible as NetworkPolicy selectors; port-scoped allow is the supported compromise.
+    - ports:
+        - protocol: TCP
+          port: 9443
