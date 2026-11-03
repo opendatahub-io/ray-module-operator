@@ -5,9 +5,9 @@ components:
     sourcePath: ray-operator/config
     odh:
       repository: https://github.com/opendatahub-io/kuberay
-      ref: dev@71a89cfae60be11ce90dfc641a84f7dd23e16e62
+      ref: dev@49b93bc634a45a664ce91b156b02740d4b957834
       snapshot: opt/manifests/odh/kuberay
     rhoai:
       repository: https://github.com/red-hat-data-services/kuberay
-      ref: main@4cb669708e722b664a9fc91635a074da2752abad
+      ref: main@54d25df96098d88f56a5e6d107f1ad59c6f5cbca
       snapshot: opt/manifests/rhoai/kuberay
