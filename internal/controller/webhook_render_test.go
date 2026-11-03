@@ -29,6 +29,7 @@ import (
 var (
 	vendoredManifestsPath = filepath.Join("..", "..", "opt", "manifests", "kuberay")
 	testTargetNS          = "test-apps"
+	webhookServiceName    = "kuberay-webhook-service"
 )
 
 func renderWebhookTestdata(t *testing.T) map[gvk][]unstructured.Unstructured {
@@ -84,8 +85,8 @@ func TestWebhookRender_MutatingWebhookConfiguration(t *testing.T) {
 	svcName, _, _ := unstructured.NestedString(wh, "clientConfig", "service", "name")
 	svcNS, _, _ := unstructured.NestedString(wh, "clientConfig", "service", "namespace")
 	svcPath, _, _ := unstructured.NestedString(wh, "clientConfig", "service", "path")
-	if svcName != "kuberay-webhook-service" {
-		t.Errorf("webhook clientConfig.service.name = %q, want %q", svcName, "kuberay-webhook-service")
+	if svcName != webhookServiceName {
+		t.Errorf("webhook clientConfig.service.name = %q, want %q", svcName, webhookServiceName)
 	}
 	if svcNS != testTargetNS {
 		t.Errorf("webhook clientConfig.service.namespace = %q, want %q", svcNS, testTargetNS)
@@ -95,11 +96,42 @@ func TestWebhookRender_MutatingWebhookConfiguration(t *testing.T) {
 	}
 }
 
-func TestWebhookRender_NoValidatingWebhookConfiguration(t *testing.T) {
+func TestWebhookRender_ValidatingWebhookConfiguration(t *testing.T) {
 	idx := renderWebhookTestdata(t)
 	key := gvk{"admissionregistration.k8s.io/v1", "ValidatingWebhookConfiguration"}
-	if vwcs := idx[key]; len(vwcs) != 0 {
-		t.Errorf("expected 0 ValidatingWebhookConfigurations, got %d", len(vwcs))
+	vwcs := idx[key]
+	if len(vwcs) != 1 {
+		t.Fatalf("expected 1 ValidatingWebhookConfiguration, got %d", len(vwcs))
+	}
+	vwc := vwcs[0]
+
+	if name := vwc.GetName(); name != "kuberay-validating-webhook-configuration" {
+		t.Errorf("name = %q, want %q", name, "kuberay-validating-webhook-configuration")
+	}
+
+	annotations := vwc.GetAnnotations()
+	if v, ok := annotations["cert-manager.io/inject-ca-from"]; !ok {
+		t.Error("missing cert-manager.io/inject-ca-from annotation")
+	} else if want := testTargetNS + "/serving-cert"; v != want {
+		t.Errorf("cert-manager.io/inject-ca-from = %q, want %q", v, want)
+	}
+
+	webhooks, _, _ := unstructured.NestedSlice(vwc.Object, "webhooks")
+	if len(webhooks) == 0 {
+		t.Fatal("expected at least one webhook entry")
+	}
+	wh := webhooks[0].(map[string]any)
+	svcName, _, _ := unstructured.NestedString(wh, "clientConfig", "service", "name")
+	svcNS, _, _ := unstructured.NestedString(wh, "clientConfig", "service", "namespace")
+	svcPath, _, _ := unstructured.NestedString(wh, "clientConfig", "service", "path")
+	if svcName != webhookServiceName {
+		t.Errorf("webhook clientConfig.service.name = %q, want %q", svcName, webhookServiceName)
+	}
+	if svcNS != testTargetNS {
+		t.Errorf("webhook clientConfig.service.namespace = %q, want %q", svcNS, testTargetNS)
+	}
+	if svcPath != "/validate-ray-io-v1-raycluster" {
+		t.Errorf("webhook clientConfig.service.path = %q, want %q", svcPath, "/validate-ray-io-v1-raycluster")
 	}
 }
 
@@ -119,8 +151,8 @@ func TestWebhookRender_Certificate(t *testing.T) {
 
 	dnsNames, _, _ := unstructured.NestedStringSlice(cert.Object, "spec", "dnsNames")
 	wantDNS := []string{
-		"kuberay-webhook-service." + testTargetNS + ".svc",
-		"kuberay-webhook-service." + testTargetNS + ".svc.cluster.local",
+		webhookServiceName + "." + testTargetNS + ".svc",
+		webhookServiceName + "." + testTargetNS + ".svc.cluster.local",
 	}
 	if !stringSliceEqual(dnsNames, wantDNS) {
 		t.Errorf("dnsNames = %v, want %v", dnsNames, wantDNS)
@@ -141,7 +173,7 @@ func TestWebhookRender_Issuer(t *testing.T) {
 
 func TestWebhookRender_WebhookService(t *testing.T) {
 	idx := renderWebhookTestdata(t)
-	svc := findResource(t, idx, gvk{"v1", "Service"}, "kuberay-webhook-service")
+	svc := findResource(t, idx, gvk{"v1", "Service"}, webhookServiceName)
 
 	ports, _, _ := unstructured.NestedSlice(svc.Object, "spec", "ports")
 	if len(ports) == 0 {
@@ -161,7 +193,7 @@ func TestWebhookRender_WebhookService(t *testing.T) {
 
 	services := idx[gvk{"v1", "Service"}]
 	for _, s := range services {
-		if s.GetName() != "kuberay-webhook-service" && s.GetName() == "kuberay-operator" {
+		if s.GetName() != webhookServiceName && s.GetName() == "kuberay-operator" {
 			return
 		}
 	}
