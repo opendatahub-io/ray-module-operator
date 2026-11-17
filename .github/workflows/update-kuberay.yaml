@@ -45,8 +45,9 @@ jobs:
               exit 1
             }
           else
-            [[ "$WORKFLOW_REF" == refs/heads/* ]] || {
-              echo "Update KubeRay must run from a branch ref, got: $WORKFLOW_REF" >&2
+            expected_ref="refs/heads/$TRUSTED_DISPATCH_BRANCH"
+            [[ "$WORKFLOW_REF" == "$expected_ref" ]] || {
+              echo "Manual dispatch is only allowed from the trusted default branch: $TRUSTED_DISPATCH_BRANCH" >&2
               exit 1
             }
             base_branch="$WORKFLOW_REF_NAME"
@@ -65,10 +66,10 @@ jobs:
     needs: validate
     name: Refresh KubeRay manifests and fallbacks
     runs-on: ubuntu-24.04
+    environment: manifests-sync
     timeout-minutes: 20
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
     concurrency:
       group: update-kuberay-${{ needs.validate.outputs.base_branch }}
       cancel-in-progress: true
@@ -227,9 +228,21 @@ jobs:
             fi
           fi
 
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.MANIFESTS_SYNC_APP_ID }}
+          private-key: ${{ secrets.MANIFESTS_SYNC_APP_PRIVATE_KEY }}
+          owner: opendatahub-io
+          repositories: ray-module-operator
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Create or update pull request
         uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
+          token: ${{ steps.app-token.outputs.token }}
           branch: automation/update-kuberay-${{ needs.validate.outputs.base_branch }}
           base: ${{ needs.validate.outputs.base_branch }}
           delete-branch: true
