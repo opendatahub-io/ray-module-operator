@@ -266,12 +266,15 @@ func TestManagerTLSOptions(t *testing.T) {
 			wantWatchable: true,
 		},
 		{
-			name:          "missing apiserver falls back to intermediate without watcher",
+			// With framework v0.4.0, NotFound (the API is served but the
+			// APIServer object is missing) returns Watchable=true so the
+			// watcher registers and catches the object's creation.
+			name:          "missing apiserver falls back to intermediate with watcher",
 			reader:        fake.NewClientBuilder().WithScheme(tlsTestScheme(t)).Build(),
 			wantMin:       tls.VersionTLS12,
 			wantCiphers:   true,
 			wantProtos:    []string{http1Proto},
-			wantWatchable: false,
+			wantWatchable: true,
 			wantFallback:  true,
 		},
 		{
