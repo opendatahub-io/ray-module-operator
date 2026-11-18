@@ -1,0 +1,8 @@
+# CRD-only provider (RHOAIENG-103171). No OpenAPI documents in this repository.
+# Read by .github/workflows/api-contract.yml for the coverage job only.
+apiVersion: contracts.rhoai.io/v1alpha1
+kind: ContractSet
+metadata:
+  name: ray-module-operator
+spec:
+  contracts: []
