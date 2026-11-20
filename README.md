@@ -52,6 +52,9 @@ Normal builds use the committed snapshots under `opt/manifests/{odh,rhoai}`.
 Run `make update-manifests` in a connected environment to refresh them from
 the pinned upstream KubeRay commits.
 
+Release the [PodMonitor RBAC update](https://redhat.atlassian.net/browse/RHAI-23212)
+with or before the [KubeRay PodMonitor controller](https://redhat.atlassian.net/browse/RHAI-23206).
+
 ## License
 
 Copyright 2026.
