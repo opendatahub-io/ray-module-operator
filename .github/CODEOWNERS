@@ -1,0 +1,4 @@
+# API contract gates (RHOAIENG-103171)
+/.rhoai/ @pawelpaszki @chipspeak @szaher @CathalOConnorRH @kryanbeane @Nolbag
+/.github/workflows/api-contract.yml @pawelpaszki @chipspeak @szaher @CathalOConnorRH @kryanbeane @Nolbag
+/docs/api-contract-checks.md @pawelpaszki @chipspeak @szaher @CathalOConnorRH @kryanbeane @Nolbag
