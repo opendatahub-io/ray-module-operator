@@ -1,0 +1,45 @@
+# API contract compatibility checks (RHOAIENG-103171), from
+# red-hat-data-services/api-contract-tests. Compares the Ray module CRD in pull
+# requests with an immutable baseline commit and fails on breaking changes.
+# Static only; no cluster required.
+#
+# Canonical CRD: config/crd/bases/*.yaml (components.platform.opendatahub.io/Ray).
+# Bundled ray.io CRDs and rendered copies are excluded in api-contract-coverage.
+#
+# Reusable workflows pin @latest on api-contract-tests.
+#
+# Baseline: 97a6b5a8cbeaf30107ec267ab7be4ecde8101637 (main at onboarding; no GA
+# release tag in this repository). Moving it forward needs approval from someone
+# other than the author.
+#
+# Runs on every pull request to main (default branch), with no path filter.
+name: API contract
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  crd-contract:
+    uses: red-hat-data-services/api-contract-tests/.github/workflows/provider-crd-check.yml@latest
+    with:
+      crd-glob: config/crd/bases/*.yaml
+      baseline-refs: 97a6b5a8cbeaf30107ec267ab7be4ecde8101637 # main
+      mode: enforce
+
+  api-contract-coverage:
+    uses: red-hat-data-services/api-contract-tests/.github/workflows/provider-coverage-check.yml@latest
+    with:
+      contract-set: .rhoai/contracts.yaml
+      baseline-refs: 97a6b5a8cbeaf30107ec267ab7be4ecde8101637 # main
+      yq-version: "4.45.1"
+      crd-globs: config/crd/bases/*.yaml
+      crd-exclude-globs: >-
+        charts/ray-module-operator/files/*.yaml
+        dist/*.yaml
+        opt/manifests/odh/kuberay/crd/bases/*.yaml
+        opt/manifests/rhoai/kuberay/crd/bases/*.yaml
+      mode: enforce
